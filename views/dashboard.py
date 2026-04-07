@@ -182,6 +182,9 @@ def dashboard_view(page: ft.Page) -> ft.View:
         cursor_color=colors["ORANGE"],
     )
 
+    username = page.session.store.get("username") or "User"
+    initials = username[:2].upper()
+
     user_avatar = ft.Container(
         width=38,
         height=38,
@@ -189,7 +192,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
         border_radius=19,
         alignment=ft.Alignment(0, 0),
         content=ft.Text(
-            "JV", size=14,
+            initials, size=14,
             weight=ft.FontWeight.W_600,
             color=colors["ORANGE"],
         ),
@@ -213,7 +216,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                             horizontal_alignment=ft.CrossAxisAlignment.END,
                             controls=[
                                 ft.Text(
-                                    "Julian V.", size=14,
+                                    username, size=14,
                                     weight=ft.FontWeight.W_600,
                                     color=colors["TEXT"],
                                 ),
