@@ -1,5 +1,5 @@
 import flet as ft
-
+import sqlite3
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -46,7 +46,6 @@ DARK = {
 
 def login_view(page: ft.Page) -> ft.View:
     colors = LIGHT.copy() if page.theme_mode == ft.ThemeMode.LIGHT else DARK.copy()
-
     logo = ft.Image(
         src="assets/logo.png",
         width=50,
@@ -213,13 +212,22 @@ def login_view(page: ft.Page) -> ft.View:
             page.update()
             return
 
-        # Demo credentials check
-        if username == "admin" and password == "admin":
+        # Check credentials against the database
+        conn = sqlite3.connect("reg.db")
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT username FROM users WHERE (username = ? OR email = ?) AND password = ?",
+            (username, username, password),
+        )
+        user = cur.fetchone()
+        conn.close()
+
+        if user:
             page.session.store.set("is_logged_in", True)
-            page.session.store.set("username", username)
+            page.session.store.set("username", user[0])
             page.go("/dashboard")
         else:
-            error_text.value = "Invalid credentials. Try admin / admin."
+            error_text.value = "Invalid credentials. Please check your username and password."
             error_text.visible = True
             page.update()
 
@@ -358,12 +366,26 @@ def login_view(page: ft.Page) -> ft.View:
                     margin=ft.Margin.only(top=6),
                     padding=ft.Padding.only(top=14),
                     border=ft.Border(top=ft.BorderSide(1, colors["CHIP_BORDER"])),
-                    content=ft.Row(
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        spacing=8,
+                    content=ft.Column(
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=12,
                         controls=[
-                            secure_icon,
-                            secure_text,
+                            ft.Row(
+                                alignment=ft.MainAxisAlignment.CENTER,
+                                spacing=8,
+                                controls=[
+                                    secure_icon,
+                                    secure_text,
+                                ],
+                            ),
+                            ft.TextButton(
+                                "Don't have an account? Register",
+                                on_click=lambda e: page.go("/register"),
+                                style=ft.ButtonStyle(
+                                    color=colors["ORANGE"],
+                                    text_style=ft.TextStyle(size=13, weight=ft.FontWeight.W_600),
+                                ),
+                            ),
                         ],
                     ),
                 ),
@@ -544,5 +566,6 @@ def login_view(page: ft.Page) -> ft.View:
         bgcolor=colors["BG"],
         vertical_alignment=ft.MainAxisAlignment.START,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        scroll=ft.ScrollMode.AUTO,
         controls=[topbar, main_layout],
     )

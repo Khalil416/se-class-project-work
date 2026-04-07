@@ -1,7 +1,7 @@
 import flet as ft
 from views.login import login_view
 from views.dashboard import dashboard_view
-
+from views.registration import registration_view
 
 def main(page: ft.Page):
     page.title = "Kitchen Waste Tracker"
@@ -15,6 +15,7 @@ def main(page: ft.Page):
     page.window.height = 900
     page.window.min_width = 1100
     page.window.min_height = 760
+    # page.window.resizable = False
 
     def route_change(e=None):
         # Middleware: protect /dashboard if not authenticated
@@ -27,6 +28,10 @@ def main(page: ft.Page):
 
         # Always add the login view as root
         page.views.append(login_view(page))
+
+        # Add registration on top if route matches
+        if page.route == "/register":
+            page.views.append(registration_view(page))
 
         # Add dashboard on top if route matches
         if page.route == "/dashboard":
