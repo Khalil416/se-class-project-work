@@ -2,6 +2,8 @@ import flet as ft
 from views.login import login_view
 from views.dashboard import dashboard_view
 from views.registration import registration_view
+from views.inventory import inventory_view
+from views.add_item import add_item_view
 
 def main(page: ft.Page):
     page.title = "Kitchen Waste Tracker"
@@ -24,6 +26,12 @@ def main(page: ft.Page):
         if page.route == "/dashboard" and not is_logged_in:
             page.route = "/"
 
+        if page.route == "/inventory" and not is_logged_in:
+            page.route = "/"
+
+        if page.route == "/add-item" and not is_logged_in:
+            page.route = "/"
+
         page.views.clear()
 
         # Always add the login view as root
@@ -36,6 +44,14 @@ def main(page: ft.Page):
         # Add dashboard on top if route matches
         if page.route == "/dashboard":
             page.views.append(dashboard_view(page))
+
+        # Add inventory on top if route matches
+        if page.route == "/inventory":
+            page.views.append(inventory_view(page))
+
+        # Add add/edit item form on top if route matches
+        if page.route == "/add-item":
+            page.views.append(add_item_view(page))
 
         page.update()
 

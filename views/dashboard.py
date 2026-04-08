@@ -87,16 +87,16 @@ def dashboard_view(page: ft.Page) -> ft.View:
     )
 
     nav_items_data = [
-        (ft.Icons.SPACE_DASHBOARD_OUTLINED, "Dashboard", True),
-        (ft.Icons.INVENTORY_2_OUTLINED, "Inventory", False),
-        (ft.Icons.TIMER_OUTLINED, "Expiry Monitor", False),
-        (ft.Icons.RECEIPT_LONG_OUTLINED, "Waste Logs", False),
-        (ft.Icons.BAR_CHART, "Reports", False),
-        (ft.Icons.CATEGORY_OUTLINED, "Categories", False),
-        (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", False),
+        (ft.Icons.SPACE_DASHBOARD_OUTLINED, "Dashboard", True, "/dashboard"),
+        (ft.Icons.INVENTORY_2_OUTLINED, "Inventory", False, "/inventory"),
+        (ft.Icons.TIMER_OUTLINED, "Expiry Monitor", False, None),
+        (ft.Icons.RECEIPT_LONG_OUTLINED, "Waste Logs", False, None),
+        (ft.Icons.BAR_CHART, "Reports", False, None),
+        (ft.Icons.CATEGORY_OUTLINED, "Categories", False, None),
+        (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", False, None),
     ]
 
-    def build_nav_item(icon, label, active=False):
+    def build_nav_item(icon, label, active=False, route=None):
         text_color = colors["ORANGE"] if active else colors["SIDEBAR_TEXT"]
         icon_color = colors["ORANGE"] if active else colors["SIDEBAR_ICON"]
         bg = colors["SIDEBAR_ACTIVE_BG"] if active else "transparent"
@@ -114,17 +114,22 @@ def dashboard_view(page: ft.Page) -> ft.View:
                 ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color=icon_color)
             )
 
+        def nav_click(e, r=route):
+            if r:
+                page.go(r)
+
         return ft.Container(
             padding=ft.Padding.symmetric(horizontal=14, vertical=10),
             bgcolor=bg,
             border_radius=8,
             content=ft.Row(spacing=12, controls=row_controls),
             ink=True,
+            on_click=nav_click if route and not active else None,
         )
 
     nav_column = ft.Column(
         spacing=2,
-        controls=[build_nav_item(i, l, a) for i, l, a in nav_items_data],
+        controls=[build_nav_item(i, l, a, r) for i, l, a, r in nav_items_data],
     )
 
     def on_sign_out(e):
