@@ -4,6 +4,7 @@ from views.dashboard import dashboard_view
 from views.registration import registration_view
 from views.inventory import inventory_view
 from views.add_item import add_item_view
+from views.components_gallery import components_gallery_view
 
 def main(page: ft.Page):
     page.title = "Kitchen Waste Tracker"
@@ -20,6 +21,10 @@ def main(page: ft.Page):
     # page.window.resizable = False
 
     def route_change(e=None):
+        page.appbar = None
+        page.bottom_appbar = None
+        page.navigation_bar = None
+
         # Middleware: protect /dashboard if not authenticated
         is_logged_in = page.session.store.get("is_logged_in")
 
@@ -30,6 +35,9 @@ def main(page: ft.Page):
             page.route = "/"
 
         if page.route == "/add-item" and not is_logged_in:
+            page.route = "/"
+
+        if page.route == "/components" and not is_logged_in:
             page.route = "/"
 
         page.views.clear()
@@ -52,6 +60,10 @@ def main(page: ft.Page):
         # Add add/edit item form on top if route matches
         if page.route == "/add-item":
             page.views.append(add_item_view(page))
+
+        # Components gallery
+        if page.route == "/components":
+            page.views.append(components_gallery_view(page))
 
         page.update()
 
