@@ -285,6 +285,19 @@ def dashboard_view(page: ft.Page) -> ft.View:
                             ),
                         ),
                         ft.Button(
+                            "UI Components",
+                            icon=ft.Icons.WIDGETS_OUTLINED,
+                            on_click=lambda e: page.go("/components"),
+                            style=ft.ButtonStyle(
+                                bgcolor=colors["CARD_BG"],
+                                color=colors["TEXT"],
+                                side=ft.BorderSide(1, colors["BORDER"]),
+                                elevation=0,
+                                shape=ft.RoundedRectangleBorder(radius=8),
+                                padding=ft.Padding.symmetric(horizontal=16, vertical=12),
+                            ),
+                        ),
+                        ft.Button(
                             "Record Waste",
                             icon=ft.Icons.ADD,
                             style=ft.ButtonStyle(
