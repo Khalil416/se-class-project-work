@@ -84,7 +84,8 @@ def _period_range(period):
     if period == "weekly":
         start = today - timedelta(days=27)
     elif period == "monthly":
-        start = today - timedelta(days=182)
+        # show last 12 months for monthly view
+        start = today - timedelta(days=365)
     else:
         start = today - timedelta(days=6)
     return start, today
@@ -122,12 +123,60 @@ def _fetch_rows(period, search_text=""):
 
 
 def _aggregate_by_day(rows, start_date, end_date):
-    labels = []
-    values = []
-    current = start_date
+    # If the range is long (several months), aggregate by month and show month-only labels.
+    span_days = (end_date - start_date).days
     by_day = {}
     for row in rows:
         by_day[row["waste_date"]] = by_day.get(row["waste_date"], 0.0) + float(row.get("cost_estimate") or 0)
+    labels = []
+    values = []
+    # If range is large, aggregate appropriately for readability
+    if span_days > 90:
+        # Aggregate by month
+        by_month = {}
+        for k, v in by_day.items():
+            try:
+                dt = datetime.strptime(k[:10], "%Y-%m-%d").date()
+                mkey = dt.strftime("%Y-%m")
+                by_month[mkey] = by_month.get(mkey, 0.0) + v
+            except Exception:
+                continue
+
+        current = date(start_date.year, start_date.month, 1)
+        while current <= end_date:
+            mkey = current.strftime("%Y-%m")
+            labels.append(current.strftime("%b"))
+            values.append(by_month.get(mkey, 0.0))
+            # advance to next month
+            if current.month == 12:
+                current = date(current.year + 1, 1, 1)
+            else:
+                current = date(current.year, current.month + 1, 1)
+        return labels, values
+
+    if span_days > 21:
+        # Aggregate by week (start date of ISO week)
+        by_week = {}
+        for k, v in by_day.items():
+            try:
+                dt = datetime.strptime(k[:10], "%Y-%m-%d").date()
+                # week start (Monday)
+                week_start = dt - timedelta(days=dt.weekday())
+                wkey = week_start.strftime("%Y-%m-%d")
+                by_week[wkey] = by_week.get(wkey, 0.0) + v
+            except Exception:
+                continue
+
+        # iterate weeks
+        current = start_date - timedelta(days=start_date.weekday())
+        while current <= end_date:
+            labels.append(current.strftime("%b %d"))
+            values.append(by_week.get(current.strftime("%Y-%m-%d"), 0.0))
+            current += timedelta(days=7)
+        return labels, values
+
+    # default: per-day labels
+    current = start_date
     while current <= end_date:
         key = current.strftime("%Y-%m-%d")
         labels.append(current.strftime("%b %d"))
@@ -205,7 +254,7 @@ def reports_view(page: ft.Page) -> ft.View:
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
             (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
         ])
-    nav_items_data.append((ft.Icons.SETTINGS_OUTLINED, "Settings", False, None))
+    # Settings removed (not implemented)
 
     nav_column = ft.Column(spacing=2, controls=[build_nav_item(i, l, a, r) for i, l, a, r in nav_items_data])
 
@@ -395,7 +444,6 @@ def reports_view(page: ft.Page) -> ft.View:
     )
 
     metric_value_total = ft.Text("$0.00", size=28, weight=ft.FontWeight.W_700, color=colors["TEXT"])
-    metric_value_weight = ft.Text("0.0 kg", size=28, weight=ft.FontWeight.W_700, color=colors["TEXT"])
     metric_value_eff = ft.Text("100.0%", size=28, weight=ft.FontWeight.W_700, color=colors["TEXT"])
 
     def metric_card(icon, title, value_control, helper_text):
@@ -422,7 +470,6 @@ def reports_view(page: ft.Page) -> ft.View:
             spacing=16,
             controls=[
                 metric_card(ft.Icons.ATTACH_MONEY, "Total Financial Loss", metric_value_total, "Sum of cost estimate from waste logs"),
-                metric_card(ft.Icons.STORAGE_OUTLINED, "Wasted Weight", metric_value_weight, "Sum of quantity wasted this period"),
                 metric_card(ft.Icons.PERCENT, "Kitchen Efficiency %", metric_value_eff, "100 - avoidable waste percentage"),
             ],
         ),
@@ -469,12 +516,10 @@ def reports_view(page: ft.Page) -> ft.View:
 
     def rebuild_charts(rows, start_date, end_date):
         total_loss = sum(float(row.get("cost_estimate") or 0) for row in rows)
-        total_weight = sum(float(row.get("qty_wasted") or 0) for row in rows)
         avoidable_loss = sum(float(row.get("cost_estimate") or 0) for row in rows if (row.get("reason") or "").lower() in {"prep_waste", "overproduction"})
         efficiency = max(0.0, 100.0 - ((avoidable_loss / total_loss) * 100.0 if total_loss else 0.0))
 
         metric_value_total.value = format_money(total_loss)
-        metric_value_weight.value = f"{total_weight:.1f} kg"
         metric_value_eff.value = f"{efficiency:.1f}%"
 
         labels, values = _aggregate_by_day(rows, start_date, end_date)
@@ -489,13 +534,13 @@ def reports_view(page: ft.Page) -> ft.View:
             min_y=0,
             max_y=max_y * 1.2,
             height=220,
-            expand=True,
+            expand=False,
             bgcolor="transparent",
             horizontal_grid_lines=fch.ChartGridLines(interval=max_y / 4 if max_y else 1, color=colors["CHART_GRID"], width=1),
             left_axis=fch.ChartAxis(show_labels=False, label_size=0),
             right_axis=fch.ChartAxis(show_labels=False, label_size=0),
             top_axis=fch.ChartAxis(show_labels=False, label_size=0),
-            bottom_axis=fch.ChartAxis(labels=[fch.ChartAxisLabel(value=i, label=ft.Text(label, size=11, color=colors["MUTED"])) for i, label in enumerate(labels)], label_size=28),
+            bottom_axis=fch.ChartAxis(labels=[fch.ChartAxisLabel(value=i, label=ft.Text(label, size=11, color=colors["MUTED"])) for i, label in enumerate(labels)], label_size=12),
             tooltip=fch.LineChartTooltip(bgcolor=colors["CARD_BG"]),
         )
         trend_chart_host.content = trend_chart
@@ -607,7 +652,6 @@ def reports_view(page: ft.Page) -> ft.View:
             spacing=16,
             controls=[
                 metric_card(ft.Icons.ATTACH_MONEY, "Total Financial Loss", metric_value_total, "Sum of cost estimate from waste logs"),
-                metric_card(ft.Icons.STORAGE_OUTLINED, "Wasted Weight", metric_value_weight, "Sum of quantity wasted this period"),
                 metric_card(ft.Icons.PERCENT, "Kitchen Efficiency %", metric_value_eff, "100 - avoidable waste percentage"),
             ],
         ),

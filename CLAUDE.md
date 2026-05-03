@@ -1,279 +1,308 @@
 # Kitchen Food Waste Tracker
 
 A role-based restaurant kitchen management desktop app built with Flet (Python).
-The system tracks food inventory, monitors expiry dates, logs waste, and produces reports — with different access levels for Chefs, Inventory Staff, and Managers.
+Tracks food inventory, monitors expiry dates, logs waste, and produces analytics —
+with role-gated access for Chefs, Inventory Staff, and Managers.
 
-> Repo: _<add GitHub link here>_
+> Repo: https://github.com/Khalil416/se-class-project-work
 > University project — Software Engineering course, Semester 6.
 
 ---
 
-## 1. Tech stack
+## 1. Tech Stack
 
 - **UI framework:** Flet (`import flet as ft`)
-- **Charts:** `flet_charts` (used in dashboard)
+- **Charts:** `flet_charts` (used in dashboard and reports)
 - **Language:** Python 3.x
-- **Database:** SQLite (file-based, two files currently: `reg.db` for users, `inventory.db` for food items — these should eventually be unified into one DB, see Section 7)
-- **Auth:** Plain-text passwords stored in DB (acceptable for this academic project; do NOT migrate to bcrypt unless explicitly asked)
-- **Session:** `page.session.store` (in-memory, per-session key/value)
+- **Databases:** SQLite (file-based)
+  - `reg.db` — users table (auth, roles)
+  - `inventory.db` — inventory, waste_logs, categories tables
+- **Auth:** Plain-text passwords (academic project — do NOT add bcrypt)
+- **Session:** `page.session.store` (in-memory key/value)
 - **Routing:** `page.route` + `route_change()` middleware in `main.py`
-- **Theme:** Custom orange-based scheme (`#E68A17`), supports light + dark mode
+- **Theme:** Orange-based (`#E68A17`), light + dark mode supported
 
-This is a **desktop** Flet app, not a web app. Window size is 1440x900, min 1100x760.
+Desktop app only. Window: 1440x900, min 1100x760.
 
 ---
 
-## 2. Project structure
+## 2. Project Structure
 
 ```
 ProjectWork/
-├── main.py                  # App entry point + routing + auth middleware
-├── reg.db                   # Users table (auth)
-├── inventory.db             # Inventory + related tables
-├── assets/                  # Logo and static assets
+├── main.py
+├── CLAUDE.md
+├── reg.db                     # users table
+├── inventory.db               # inventory, waste_logs, categories
+├── assets/logo.png
 ├── .gitignore
 └── views/
-    ├── __init__.py
-    ├── login.py             # → login_view(page)        route: "/"
-    ├── registration.py      # → registration_view(page) route: "/register"
-    ├── dashboard.py         # → dashboard_view(page)    route: "/dashboard"
-    ├── inventory.py         # → inventory_view(page)    route: "/inventory"
-    └── add_item.py          # → add_item_view(page)     route: "/add-item"
+    ├── login.py               # route: "/"
+    ├── dashboard.py           # route: "/dashboard"
+    ├── inventory.py           # route: "/inventory"
+    ├── add_item.py            # route: "/add-item"
+    ├── item_detail.py         # route: "/item/{id}"
+    ├── waste_new.py           # route: "/waste/new"
+    ├── expiry_monitor.py      # route: "/expiry"
+    ├── waste_logs.py          # route: "/waste-logs"
+    ├── reports.py             # route: "/reports"
+    ├── categories.py          # route: "/categories"
+    └── users_staff.py         # route: "/users"
 ```
-
-Each view module exposes a single function returning an `ft.View`. The function builds the entire screen and returns it — `main.py` then appends the returned View to `page.views`.
 
 ---
 
-## 3. Routing & auth pattern
+## 3. Routing & Auth
 
-Routing logic lives in `main.py` inside `route_change()`:
+`route_change()` in `main.py`:
+1. Read `is_logged_in` and `role` from `page.session.store`.
+2. Unauthenticated → redirect to `/`.
+3. Role-based redirects to `/dashboard` if unauthorized:
+   - Manager-only: `/reports`, `/categories`, `/users`
+   - Manager + Inventory Staff: `/expiry`, `/waste-logs`
+   - Chef + Manager: `/waste/new`
+4. `page.views.clear()` → append `login_view(page)` → append matched view.
+5. `page.update()`.
 
-1. Read `is_logged_in` from `page.session.store`.
-2. If route is protected (`/dashboard`, `/inventory`, `/add-item`, etc.) and user is NOT logged in → redirect to `/`.
-3. `page.views.clear()`.
-4. Always append `login_view(page)` as the base.
-5. Append the matching view on top (registration / dashboard / inventory / add-item).
-6. `page.update()`.
-
-**Conventions when adding a new protected route:**
-- Add the route to the auth check at the top of `route_change()`.
-- Add an `if page.route == "/your-route":` block that appends the new view.
-- Use `page.go("/your-route")` to navigate.
-- Use `page.session.store.set(...)` to pass small payloads between views (e.g., `edit_item_id`).
-- Use `page.session.store.remove(...)` to clean up after consuming.
-
-**Auth keys in session:**
+**Session keys:**
 - `is_logged_in` (bool)
 - `username` (str)
-- `role` (str — to be added; see Section 6)
-- `edit_item_id` (int, optional — used to pass which item is being edited to `add_item_view`)
+- `role` (str: `'chef'` | `'inventory_staff'` | `'manager'`)
+- `edit_item_id` (int, optional)
 
 ---
 
-## 4. UI conventions
+## 4. Database Schema
 
-### Colors
-
-Each view defines its own `LIGHT` and `DARK` dictionaries at the top. Common keys:
-
-| Key | Purpose |
-|---|---|
-| `ORANGE` | `#E68A17` — primary accent (buttons, active nav, badges) |
-| `BG` | Page background |
-| `CARD_BG` | Card background |
-| `TEXT`, `TEXT_SECONDARY`, `MUTED` | Text hierarchy |
-| `BORDER`, `DIVIDER` | Lines and separators |
-| `GREEN`, `GREEN_BG` | Fresh / success status |
-| `RED`, `RED_BG` | Expired / error status |
-| `ORANGE_BG` | Near expiry / warning highlight |
-| `SIDEBAR_BG`, `SIDEBAR_ACTIVE_BG` | Left nav |
-| `SHADOW` | Subtle card shadow (low alpha) |
-
-> **Tech debt note:** these dicts are duplicated across every view. When refactoring, consider moving them to a shared `views/theme.py` module. Do NOT refactor unless explicitly asked.
-
-### Typography & spacing
-- Page titles: `size=26, weight=W_700`
-- Section/card titles: `size=16, weight=W_600`
-- Body: `size=13–14`
-- Muted/helper text: `size=12, color=MUTED`
-- Card padding: `20–28px`
-- Card border radius: `12`
-- Input border radius: `8–10`
-- Button border radius: `8`
-
-### Layout pattern (full app pages)
+### reg.db — users
+```sql
+CREATE TABLE users (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    username    TEXT NOT NULL UNIQUE,
+    email       TEXT NOT NULL UNIQUE,
+    password    TEXT NOT NULL,
+    role        TEXT DEFAULT 'chef',
+    is_active   INTEGER DEFAULT 1,
+    created_at  TEXT DEFAULT CURRENT_TIMESTAMP
+)
 ```
-[Sidebar 240px] [Top bar with search + user avatar]
-                [Page title + subtitle + primary CTA]
-                [Filters / tabs]
-                [Main content (table / cards / form)]
-                [Bottom stats row (optional)]
-                [Footer]
+**Seeded on startup:** `username='manager', password='1234', role='manager'` (head manager).
+
+**Head manager rules:**
+- Only `username='manager'` can edit/deactivate other manager accounts.
+- Regular managers can only edit chef and inventory_staff users.
+- The `username='manager'` account cannot be edited or deactivated by anyone.
+
+**Login rules:**
+- `is_active=0` → blocked: "Account deactivated. Contact your manager."
+
+### inventory.db — inventory
+```sql
+CREATE TABLE inventory (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_name       TEXT NOT NULL,
+    sku             TEXT NOT NULL UNIQUE,
+    category        TEXT NOT NULL,
+    quantity        REAL NOT NULL,
+    unit            TEXT NOT NULL,
+    storage         TEXT NOT NULL,
+    expiry_date     TEXT NOT NULL,
+    created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+    purchase_date   TEXT DEFAULT '',
+    internal_notes  TEXT DEFAULT '',
+    batch_number    TEXT DEFAULT '',
+    alert_threshold INTEGER DEFAULT 3
+)
 ```
+Status (Fresh / Expiring Soon / Expired) is computed in Python, never stored.
 
-### Components
-- Sidebar nav: orange background tint + chevron when active.
-- Status badges: small rounded rect, colored bg + matching text color (Fresh = green, Expiring Soon = orange, Expired = red).
-- Forms: section headers with circular orange icon, asterisk-marked required fields, helper italic text below.
-- Tables: light gray header bg (`TABLE_HEADER_BG`), divider lines between rows, status badge column on the right, popup menu (`MORE_VERT`) for row actions.
+### inventory.db — waste_logs
+```sql
+CREATE TABLE waste_logs (
+    log_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id       INTEGER,
+    qty_wasted    REAL NOT NULL,
+    unit          TEXT NOT NULL,
+    reason        TEXT NOT NULL,
+    waste_date    TEXT NOT NULL,
+    notes         TEXT,
+    cost_estimate REAL
+)
+```
+Valid reasons: `expired`, `spoiled`, `prep_waste`, `overproduction`, `damaged`, `other`.
+Cost estimate = `qty_wasted x 10` (placeholder rate).
 
----
+### inventory.db — categories
+```sql
+CREATE TABLE categories (
+    category_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_name   TEXT NOT NULL UNIQUE,
+    description     TEXT,
+    shelf_life_days INTEGER DEFAULT 7
+)
+```
+Seeded with 5 defaults on first run.
 
-## 5. Database schema (target — based on ERD)
-
-Currently only two tables exist: `users` (in `reg.db`) and `inventory` (in `inventory.db`). The full target schema below is what the project is moving toward — implement tables as features are built.
-
-### Users & roles
-- **`users`** — `user_id PK`, `username UNIQUE`, `password`, `email UNIQUE`, `role ENUM('chef','inventory_staff','manager')`, `created_at`, `is_active`
-- **`chefs`** — `chef_id PK`, `user_id FK`, `full_name`, `phone`, `section`, `hired_date`
-- **`inventory_staff`** — `staff_id PK`, `user_id FK`, `full_name`, `phone`, `shift`, `hired_date`
-- **`managers`** — `manager_id PK`, `user_id FK`, `full_name`, `phone`, `department`, `hired_date`
-
-### Inventory & catalog
-- **`categories`** — `category_id PK`, `category_name`, `description`, `shelf_life_days` (used to auto-suggest expiry dates)
-- **`food_items`** — `item_id PK`, `category_id FK`, `added_by FK→user_id`, `item_name`, `quantity DECIMAL(10,2)`, `unit`, `purchase_date`, `storage_loc`
-- **`expiry_dates`** — `expiry_id PK`, `item_id FK`, `expiry_date`, `batch_no`, `alert_threshold INT`, `status ENUM`
-
-> **Note:** Current `inventory` table mixes food item + expiry data into one row. Target schema separates batches into `expiry_dates` so a single item (e.g., Organic Whole Milk) can have multiple batches (LOT-2024-001, LOT-2024-002…) each with its own expiry date. Item detail page in mock-up shows this multi-batch view.
-
-### Operations
-- **`waste_logs`** — `log_id PK`, `item_id FK`, `recorded_by FK→user_id`, `qty_wasted`, `unit`, `reason ENUM('expired','spoiled','prep_waste','overproduction','damaged','other')`, `waste_date`, `notes`, `cost_estimate`
-
-### Out of scope for this project
-- **`notifications`** table is in the ERD but **not implemented**. No SMS, email, or push integrations. The "Send Expiry Alert" use case in the UCD is intentionally skipped — this is a third-party concern outside the academic scope.
-
-### Migration approach
-- Use `PRAGMA table_info(table_name)` and `ALTER TABLE ... ADD COLUMN` for non-destructive migrations (already done in `add_item.py` and `inventory.py`).
-- Wrap migration logic in a `_init_*_db()` or `_ensure_columns()` helper called at the top of each view function. This is the established pattern.
+### Migration pattern
+All views use `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` — never drop/recreate tables.
 
 ---
 
-## 6. Role-based access (planned)
+## 5. Role-Based Access
 
-Per the use case diagram, three roles with these capabilities:
-
-| Action | Chef | Inventory Staff | Manager |
+| Feature | Chef | Inventory Staff | Manager |
 |---|:---:|:---:|:---:|
-| Record Waste | ✅ | | |
-| Add Food Item | ✅ | ✅ | |
-| Update Stock (Quantity) | ✅ | ✅ | |
-| Monitor Expiry (view near-expiry) | | ✅ | ✅ |
-| Generate Waste Report | | | ✅ |
-| Manage Categories | | | ✅ |
-| Manage Users & Staff | | | ✅ |
+| Dashboard | ✅ | ✅ | ✅ |
+| Inventory (view + add) | ✅ | ✅ | ✅ |
+| Record Waste `/waste/new` | ✅ | | ✅ |
+| Expiry Monitor `/expiry` | | ✅ | ✅ |
+| Waste Logs `/waste-logs` | | ✅ | ✅ |
+| Reports `/reports` | | | ✅ |
+| Categories `/categories` | | | ✅ |
+| Users & Staff `/users` | | | ✅ |
 
-**Implementation pattern when role gating is added:**
-- Store `role` in `page.session.store` after login.
-- Build sidebar nav items conditionally based on role.
-- At the top of each view's function, check role and redirect to `/dashboard` if not authorized.
-- Helper to add later: `views/auth.py` with `require_role(page, allowed_roles)`.
+Sidebar nav built conditionally in every view:
+```python
+role = page.session.store.get("role") or "chef"
+nav_items_data = [Dashboard, Inventory]  # always visible
+if role in ("inventory_staff", "manager"):
+    nav_items_data += [Expiry Monitor, Waste Logs]
+if role == "manager":
+    nav_items_data += [Reports, Categories, Users & Staff]
+# Settings is intentionally NOT in sidebar — removed
+```
 
-**Demo accounts to seed (suggested):**
-- `chef_julian` / Chef
-- `staff_sarah` / Inventory Staff
-- `manager_mike` / Manager
-
----
-
-## 7. Build status — pages
-
-The mock UI defines 12+ screens. Current state:
-
-### ✅ Built
-- **Login** (`/`) — username/email + password, persona chips, light/dark toggle.
-- **Registration** (`/register`) — username + email + password + confirm.
-- **Dashboard** (`/dashboard`) — 4 stat cards, waste distribution bars, daily waste line chart, expiring soon table, recent waste logs table.
-- **Inventory list** (`/inventory`) — search + 3 filters, paginated table (6/page), 4-card stats row at the bottom, edit/delete actions per row.
-- **Add / Edit Food Item** (`/add-item`) — three-section form (Basic / Inventory & Units / Expiry Monitoring), reused for both add and edit via `edit_item_id` session key.
-
-### ❌ To build (priority order)
-1. **Item Detail page** — `/item/{id}` — header card with item summary, tabs (Expiry Batches / Waste History / Activity Timeline), supplier info, last handled by, usage policy. Shows multiple batches per item.
-2. **Update Stock modal** — Restock (Add) / Withdraw (Subtract) toggle, adjustment amount, projected new total preview, optional note. Triggered from item detail and inventory row.
-3. **Record Food Waste** (`/waste/new`) — item picker, qty wasted, unit, primary reason dropdown, date/time, cost adjustment (auto-calc), disposal notes. Sidebar shows projected loss.
-4. **Expiry Monitor** (`/expiry`) — tabs (Near Expiry / Expired / All Items), batch-level table, threshold slider (default 3 days), info cards at the bottom.
-5. **Waste Logs** (`/waste-logs`) — audit trail with date range, reason filter, search; top-row summary metrics (Waste Cost Today, Volume MTD, Avoidable Waste %); optimization insight card.
-6. **Reports / Analytics** (`/reports`) — Manager-only. Daily/Weekly/Monthly toggle, financial loss / wasted weight / efficiency cards, waste cost trend line, waste-by-reason donut, top wasted items by cost bar chart, manager insight card.
-7. **Categories Management** (`/categories`) — Manager-only. CRUD for categories with `shelf_life_days` defaults driving expiry-date suggestions in Add Food Item.
-8. **Users & Staff** (`/users`) — Manager-only. Tabs: Staff Profiles + System Users. Add Profile / New User modal with role linking.
-
-### Skipped intentionally
-- Notification inbox / SMS / email alerts (third-party out of scope).
-- "Forgot password" flow (placeholder button only).
+Role label mapping:
+```python
+{"chef": "Kitchen Staff", "inventory_staff": "Inventory Manager", "manager": "General Manager"}
+```
 
 ---
 
-## 8. Code patterns to follow
+## 6. UI Conventions
 
-### View function shape
+Each view has its own `LIGHT` and `DARK` color dicts at the top.
+Do NOT refactor into shared module unless explicitly asked.
+
+Key colors: `ORANGE=#E68A17`, `BG`, `CARD_BG`, `TEXT`, `MUTED`, `BORDER`,
+`GREEN/GREEN_BG` (Fresh), `RED/RED_BG` (Expired), `ORANGE_BG` (Near Expiry).
+
+Layout pattern:
+```
+[Sidebar 240px] | [Top bar: search + user info]
+                  [Page title + CTA]
+                  [Filters / tabs]
+                  [Main content]
+                  [Footer]
+```
+
+Standard components:
+- Sidebar nav: orange bg + chevron when active
+- Status pill: colored rounded rect (Fresh=green, Expiring=orange, Expired=red)
+- Card: `border_radius=12, shadow=card_shadow()`
+- Table: `TABLE_HEADER_BG` header, `DIVIDER` between rows, `MORE_VERT` popup
+
+---
+
+## 7. Build Status
+
+### ✅ All Pages Built
+| Page | Route |
+|---|---|
+| Login | `/` |
+| Dashboard | `/dashboard` — real data fix in progress |
+| Inventory | `/inventory` |
+| Add/Edit Item | `/add-item` |
+| Item Detail | `/item/{id}` |
+| Record Food Waste | `/waste/new` |
+| Expiry Monitor | `/expiry` |
+| Waste Logs | `/waste-logs` |
+| Reports | `/reports` |
+| Categories | `/categories` |
+| Users & Staff | `/users` |
+
+### ❌ Intentionally Skipped
+- Public registration (managers create users via `/users`)
+- Notifications / SMS / email alerts
+- Settings page
+- Forgot password
+
+---
+
+## 8. Current Issues To Fix
+
+### Dashboard (top priority)
+All data is hardcoded — must be replaced with real DB queries:
+- Stat cards: Total Items, Near Expiry, Expired Today, Waste Cost (Wk)
+- Waste Distribution bars → waste_logs GROUP BY category JOIN inventory
+- Daily Waste Trend chart → waste_logs last 7 days SUM cost per day
+- Expiring Soon table → inventory WHERE expiry_date <= today+7, LIMIT 5
+- Recent Waste Logs → waste_logs JOIN inventory ORDER BY waste_date DESC LIMIT 5
+- "View Monitor" button → wire to page.go("/expiry")
+- "All Logs" button → wire to page.go("/waste-logs")
+
+### Other views — minor
+- `item_detail.py` Waste History tab: shows placeholder even when real data exists
+- `waste_new.py`: after save redirects to `/inventory` — should go to `/waste-logs`
+- `reports.py` Download CSV: no-op — show SnackBar "Export coming soon"
+- `waste_logs.py`: missing "+ Record Waste" button in header
+
+---
+
+## 9. Code Patterns
+
 ```python
 def some_view(page: ft.Page) -> ft.View:
-    _init_db()                                  # if this view owns a table
+    _init_db()
     colors = LIGHT.copy() if page.theme_mode == ft.ThemeMode.LIGHT else DARK.copy()
-
-    # 1. helpers (card_shadow, build_nav_item, status_badge…)
-    # 2. controls (top_bar, sidebar, content_header, table_body…)
-    # 3. event handlers (on_save, on_delete, refresh_table…)
-    # 4. initial load
-    # 5. assemble layout (Row → Column → Containers)
-
+    role = page.session.store.get("role") or "chef"
+    # 1. helpers → 2. sidebar + top_bar → 3. content → 4. handlers → 5. load → 6. layout
     return ft.View(route="/...", padding=0, spacing=0, bgcolor=colors["BG"], controls=[layout])
 ```
 
-### DB helpers
-- Always parameterize SQL: `cur.execute("... WHERE id=?", (item_id,))`. Never f-string user input into SQL.
-- Open connection, do work, close. No connection pooling.
-- Use `conn.row_factory = sqlite3.Row` when you want dict-like access.
-- Status fields like "Fresh / Expiring Soon / Expired" are computed in Python from `expiry_date`, NOT stored in DB.
-
-### Filtering tables
-Pattern from `inventory.py`:
+SQL rules:
 ```python
-def _get_items(search="", category="All Categories", status="All Status", storage="All Storage"):
-    query = "SELECT ... FROM inventory WHERE 1=1"
-    params = []
-    if search:
-        query += " AND (item_name LIKE ? OR sku LIKE ?)"
-        params.extend([f"%{search}%", f"%{search}%"])
-    # ...
+# Always parameterize — NEVER f-string SQL
+cur.execute("SELECT * FROM inventory WHERE id=?", (item_id,))
+
+# Status always computed in Python
+days_left = (expiry_date - today).days
+status = "Expired" if days_left < 0 else "Expiring Soon" if days_left <= 7 else "Fresh"
 ```
-Status filter is applied in Python after fetch (since status is computed).
 
-### Pagination
-Pure-Python slicing with a page index. See `inventory.py`'s `current_page` + `items_per_page = 6`.
-
----
-
-## 9. What NOT to do
-
-- ❌ Do not call `page.views.clear()` outside `route_change()` — it breaks the back-stack.
-- ❌ Do not navigate by mutating `page.views` directly — always use `page.go(route)`.
-- ❌ Do not access protected views without checking `is_logged_in` first.
-- ❌ Do not add hashing / bcrypt to passwords unless explicitly requested (academic scope).
-- ❌ Do not introduce third-party services (SendGrid, Twilio, Firebase, etc.) — notifications are out of scope.
-- ❌ Do not switch from SQLite to Postgres / MySQL — keep it file-based.
-- ❌ Do not refactor the duplicated `LIGHT` / `DARK` dicts unless explicitly asked. They are tech debt but they work.
-- ❌ Do not change the orange brand color (`#E68A17`) — it's tied to the logo and the entire design system.
-- ❌ Do not use f-strings inside SQL — always parameterize.
-- ❌ Do not generate emojis in the UI — the design uses Material icons only (`ft.Icons.*`).
-- ❌ Do not add a notifications inbox / mock alerts page — it's intentionally skipped.
+Empty state pattern:
+```python
+if not rows:
+    col.controls.append(ft.Container(
+        padding=ft.Padding.symmetric(vertical=40),
+        alignment=ft.Alignment(0, 0),
+        content=ft.Text("No data yet.", size=14, color=colors["MUTED"]),
+    ))
+```
 
 ---
 
-## 10. Glossary (domain terms)
+## 10. What NOT To Do
 
-- **Batch / LOT** — a specific shipment of an item with its own expiry date. One item can have many batches.
-- **Near Expiry** — within `alert_threshold` days of `expiry_date` (default threshold = 3 days).
-- **Avoidable waste** — waste from `prep_waste` or `overproduction` reasons (not `expired` or `spoiled`).
-- **Stock value** — rough estimate of inventory monetary value (currently `quantity × $10` placeholder).
-- **Storage location** — physical place in the kitchen (Walk-in Fridge, Freezer A, Dry Storage, etc.).
-- **Personas** — synonym for roles (Chef = Kitchen Staff; Inventory Mgr; General Mgr).
+- ❌ Do not add bcrypt or password hashing
+- ❌ Do not add third-party services (email, SMS, Firebase)
+- ❌ Do not switch to Postgres/MySQL
+- ❌ Do not refactor LIGHT/DARK color dicts into shared module
+- ❌ Do not change brand color `#E68A17`
+- ❌ Do not use f-strings inside SQL
+- ❌ Do not add Settings page or sidebar link
+- ❌ Do not add notifications/inbox page
+- ❌ Do not call `page.views.clear()` outside `route_change()`
+- ❌ Do not allow `username='manager'` account to be edited or deactivated
 
 ---
 
-## 11. When in doubt
+## 11. Glossary
 
-- Match the visual style of the mock UI PDF (orange accents, white cards, generous whitespace, status pill badges).
-- Match the code style of `inventory.py` and `add_item.py` — they are the most recent and reflect the intended pattern.
-- Keep changes minimal and scoped. This is an academic project; a working partial feature beats an over-engineered one.
-- Before adding a new dependency, check whether stdlib or Flet built-ins can do the job.
+- **Near Expiry** — `0 <= days_left <= alert_threshold` (default 3)
+- **Expiring Soon** (inventory list) — `days_left <= 7`
+- **Expired** — `days_left < 0`
+- **Avoidable waste** — reason is `prep_waste` or `overproduction`
+- **Stock value** — `SUM(quantity x 10)` placeholder
+- **Head manager** — seeded account `username='manager'`
+- **Batch** — one inventory row = one batch of a food item

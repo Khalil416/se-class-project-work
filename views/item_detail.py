@@ -72,7 +72,7 @@ def _get_item(item_id):
 def _update_quantity(item_id, new_qty):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("UPDATE inventory SET quantity=? WHERE id=?", (new_qty, item_id))
+    cur.execute("UPDATE inventory SET quantity=? WHERE id=?", (round(float(new_qty), 3), item_id))
     conn.commit()
     conn.close()
 
@@ -164,7 +164,7 @@ def item_detail_view(page: ft.Page, item_id: int) -> ft.View:
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
             (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
         ])
-    nav_items_data.append((ft.Icons.SETTINGS_OUTLINED, "Settings", False, None))
+    # Settings removed (not implemented)
 
     def build_nav_item(icon, label, active=False, route=None):
         text_color = colors["ORANGE"] if active else colors["SIDEBAR_TEXT"]
@@ -342,6 +342,7 @@ def item_detail_view(page: ft.Page, item_id: int) -> ft.View:
     )
 
     def on_record_waste(e):
+        page.session.store.set("waste_item_id", item_id)
         page.go("/waste/new")
 
     def show_update_stock_dialog():

@@ -187,7 +187,7 @@ def waste_logs_view(page: ft.Page) -> ft.View:
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
             (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
         ])
-    nav_items_data.append((ft.Icons.SETTINGS_OUTLINED, "Settings", False, None))
+    # Settings removed (not implemented)
 
     nav_column = ft.Column(
         spacing=2,
@@ -399,7 +399,6 @@ def waste_logs_view(page: ft.Page) -> ft.View:
     all_rows_cache = _fetch_waste_logs()
 
     metric_today_text = ft.Text("$0.00", size=24, weight=ft.FontWeight.W_700, color=colors["TEXT"])
-    metric_volume_text = ft.Text("0.0 kg", size=24, weight=ft.FontWeight.W_700, color=colors["TEXT"])
     metric_avoidable_text = ft.Text("0.0%", size=24, weight=ft.FontWeight.W_700, color=colors["TEXT"])
 
     summary_card_today = ft.Container(
@@ -415,23 +414,6 @@ def waste_logs_view(page: ft.Page) -> ft.View:
                 ft.Row(spacing=8, controls=[ft.Icon(ft.Icons.ATTACH_MONEY, size=16, color=colors["MUTED"]), ft.Text("Waste Cost Today", size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"])]),
                 metric_today_text,
                 ft.Text("Cost estimate recorded for today", size=12, color=colors["MUTED"]),
-            ],
-        ),
-    )
-
-    summary_card_volume = ft.Container(
-        expand=True,
-        bgcolor=colors["CARD_BG"],
-        border=ft.Border.all(1, colors["BORDER"]),
-        border_radius=12,
-        shadow=card_shadow(),
-        padding=ft.Padding.all(20),
-        content=ft.Column(
-            spacing=8,
-            controls=[
-                ft.Row(spacing=8, controls=[ft.Icon(ft.Icons.STORAGE_OUTLINED, size=16, color=colors["MUTED"]), ft.Text("Volume MTD", size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"])]),
-                metric_volume_text,
-                ft.Text("Total wasted quantity this month", size=12, color=colors["MUTED"]),
             ],
         ),
     )
@@ -453,7 +435,7 @@ def waste_logs_view(page: ft.Page) -> ft.View:
         ),
     )
 
-    metric_row = ft.Container(padding=ft.Padding.symmetric(horizontal=32, vertical=8), content=ft.Row(spacing=16, controls=[summary_card_today, summary_card_volume, summary_card_avoidable]))
+    metric_row = ft.Container(padding=ft.Padding.symmetric(horizontal=32, vertical=8), content=ft.Row(spacing=16, controls=[summary_card_today, summary_card_avoidable]))
 
     filters_row = ft.Container(
         padding=ft.Padding.symmetric(horizontal=32, vertical=10),
@@ -613,7 +595,6 @@ def waste_logs_view(page: ft.Page) -> ft.View:
     def refresh_metrics(rows):
         waste_today, month_volume, avoidable_pct, top_reason, top_reason_cost = compute_metrics(rows)
         metric_today_text.value = format_money(waste_today)
-        metric_volume_text.value = f"{month_volume:.1f} kg"
         metric_avoidable_text.value = f"{avoidable_pct:.1f}%"
         if top_reason_cost > 0:
             insight_text.value = f"Highest cost this month: {top_reason.replace('_', ' ').title()} at {format_money(top_reason_cost)}"

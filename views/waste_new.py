@@ -92,6 +92,7 @@ def waste_new_view(page: ft.Page) -> ft.View:
     _init_waste_db()
     colors = LIGHT.copy() if page.theme_mode == ft.ThemeMode.LIGHT else DARK.copy()
     role = page.session.store.get("role") or "chef"
+    prefill_item_id = page.session.store.get("waste_item_id")
 
     def get_role_label(r):
         """Map role string to display label."""
@@ -106,10 +107,11 @@ def waste_new_view(page: ft.Page) -> ft.View:
     f_qty = ft.TextField(hint_text="0", keyboard_type=ft.KeyboardType.NUMBER, width=240, height=44)
     f_date = ft.TextField(value=datetime.now().strftime("%Y-%m-%d"), width=200, height=44)
     f_reason = ft.Dropdown(width=300, height=44)
-    f_cost = ft.TextField(value="0.00", width=200, height=44, disabled=True)
+    f_cost = ft.TextField(hint_text="Enter price per amount", value="0.00", width=200, height=44, keyboard_type=ft.KeyboardType.NUMBER)
     f_notes = ft.TextField(multiline=True, min_lines=3, max_lines=6)
 
     t_loss = ft.Text("$0.00", size=22, weight=ft.FontWeight.W_700, color=colors["MUTED"])
+    t_unit_price = ft.Text("$0.00", size=13, color=colors["MUTED"])
     t_item_name = ft.Text("—", size=13, color=colors["MUTED"])
     t_qty_display = ft.Text("—", size=13, color=colors["MUTED"])
     t_reason_display = ft.Text("—", size=13, color=colors["MUTED"])
@@ -127,16 +129,29 @@ def waste_new_view(page: ft.Page) -> ft.View:
 
     def _recalc():
         try:
+            unit_price = float(f_cost.value or 0)
+        except Exception:
+            unit_price = 0.0
+        try:
             qty = float(f_qty.value or 0)
         except Exception:
             qty = 0.0
-        cost = qty * 10.0
-        t_loss.value = f"${cost:.2f}"
-        t_loss.color = colors["ORANGE"] if cost > 0 else colors["MUTED"]
+        total_cost = unit_price * qty
+        t_loss.value = f"${total_cost:.2f}"
+        t_unit_price.value = f"${unit_price:.2f} per amount" if unit_price > 0 else "$0.00 per amount"
+        t_loss.color = colors["ORANGE"] if total_cost > 0 else colors["MUTED"]
         unit_val = f_unit.value or ""
         t_qty_display.value = f"{qty} {unit_val}" if qty > 0 else "—"
         t_reason_display.value = f_reason.value or "—"
-        f_cost.value = f"{cost:.2f}"
+
+    if prefill_item_id is not None:
+        selected = next((i for i in inventory_items if str(i["id"]) == str(prefill_item_id)), None)
+        if selected:
+            f_item.value = str(selected["id"])
+            f_unit.value = selected.get("unit") or f_unit.value
+            t_item_name.value = selected.get("item_name") or "—"
+            _recalc()
+        page.session.store.remove("waste_item_id")
 
     def on_item_change(e):
         sel = f_item.value
@@ -160,6 +175,8 @@ def waste_new_view(page: ft.Page) -> ft.View:
         page.update()
 
     def on_cancel(e):
+        if page.session.store.contains_key("waste_item_id"):
+            page.session.store.remove("waste_item_id")
         page.go("/inventory")
 
     def on_save(e):
@@ -194,18 +211,54 @@ def waste_new_view(page: ft.Page) -> ft.View:
         waste_date = f_date.value or datetime.now().strftime("%Y-%m-%d")
         notes = f_notes.value or ""
         try:
-            cost = float(f_cost.value or 0)
+            unit_price = float(f_cost.value or 0)
         except Exception:
-            cost = qty * 10.0
+            unit_price = 0.0
+        cost = round(unit_price * qty, 2)
 
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO waste_logs (item_id, qty_wasted, unit, reason, waste_date, notes, cost_estimate) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (item_id, qty, unit, reason, waste_date, notes, cost),
-        )
-        conn.commit()
-        conn.close()
+        
+        # Check current inventory quantity
+        cur.execute("SELECT quantity FROM inventory WHERE id=?", (item_id,))
+        row = cur.fetchone()
+        if not row:
+            err_text.value = "Item not found in inventory."
+            err_text.visible = True
+            conn.close()
+            page.update()
+            return
+        
+        current_qty = float(row[0])
+        if qty > current_qty + 1e-9:
+            err_text.value = f"Cannot waste {qty} {unit}. Only {current_qty} {unit} available."
+            err_text.visible = True
+            conn.close()
+            page.update()
+            return
+        
+        # Insert waste log and decrement inventory in transaction
+        try:
+            cur.execute(
+                "INSERT INTO waste_logs (item_id, qty_wasted, unit, reason, waste_date, notes, cost_estimate) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (item_id, qty, unit, reason, waste_date, notes, cost),
+            )
+            # Round to avoid float artifacts like 9.600000000000001 in SQLite/UI.
+            new_qty = round(max(0.0, current_qty - qty), 3)
+            cur.execute("UPDATE inventory SET quantity=? WHERE id=?", (new_qty, item_id))
+            conn.commit()
+        except Exception as ex:
+            conn.rollback()
+            err_text.value = f"Error saving waste: {str(ex)}"
+            err_text.visible = True
+            conn.close()
+            page.update()
+            return
+        finally:
+            conn.close()
+
+        if page.session.store.contains_key("waste_item_id"):
+            page.session.store.remove("waste_item_id")
 
         page.go("/inventory")
 
@@ -249,14 +302,14 @@ def waste_new_view(page: ft.Page) -> ft.View:
     # Left column cards
     item_card = ft.Container(margin=ft.Margin(32, 16, 32, 0), bgcolor=colors["CARD_BG"], border=ft.Border.all(1, colors["BORDER"]), border_radius=12, shadow=card_shadow(), padding=ft.Padding.all(20), content=ft.Column(spacing=12, controls=[ft.Row(spacing=10, controls=[ft.Icon(ft.Icons.INVENTORY_2, color=colors["ORANGE"]), ft.Text("Item Selection", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"]) ]), f_item, ft.Row(spacing=12, controls=[ft.Text("Unit:", size=13, color=colors["MUTED"]), f_unit, ft.Container(expand=True)]), err_text]))
 
-    logistics_card = ft.Container(margin=ft.Margin(32, 16, 32, 0), bgcolor=colors["CARD_BG"], border=ft.Border.all(1, colors["BORDER"]), border_radius=12, shadow=card_shadow(), padding=ft.Padding.all(20), content=ft.Column(spacing=12, controls=[ft.Row(spacing=10, controls=[ft.Icon(ft.Icons.SCALE, color=colors["ORANGE"]), ft.Text("Logistics", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"]) ]), ft.Row(spacing=12, controls=[ft.Column(spacing=6, controls=[ft.Text("Quantity", size=12, color=colors["MUTED"]), f_qty]), ft.Column(spacing=6, controls=[ft.Text("Date", size=12, color=colors["MUTED"]), f_date]) ]), ft.Column(spacing=6, controls=[ft.Text("Reason", size=12, color=colors["MUTED"]), f_reason]), ft.Column(spacing=6, controls=[ft.Text("Cost Estimate (auto)", size=12, color=colors["MUTED"]), f_cost]) ]))
+    logistics_card = ft.Container(margin=ft.Margin(32, 16, 32, 0), bgcolor=colors["CARD_BG"], border=ft.Border.all(1, colors["BORDER"]), border_radius=12, shadow=card_shadow(), padding=ft.Padding.all(20), content=ft.Column(spacing=12, controls=[ft.Row(spacing=10, controls=[ft.Icon(ft.Icons.SCALE, color=colors["ORANGE"]), ft.Text("Logistics", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"]) ]), ft.Row(spacing=12, controls=[ft.Column(spacing=6, controls=[ft.Text("Quantity", size=12, color=colors["MUTED"]), f_qty]), ft.Column(spacing=6, controls=[ft.Text("Date", size=12, color=colors["MUTED"]), f_date]) ]), ft.Column(spacing=6, controls=[ft.Text("Reason", size=12, color=colors["MUTED"]), f_reason]), ft.Column(spacing=6, controls=[ft.Text("Price per Amount", size=12, color=colors["MUTED"]), f_cost]) ]))
 
     notes_card = ft.Container(margin=ft.Margin(32, 16, 32, 0), bgcolor=colors["CARD_BG"], border=ft.Border.all(1, colors["BORDER"]), border_radius=12, shadow=card_shadow(), padding=ft.Padding.all(20), content=ft.Column(spacing=12, controls=[ft.Row(spacing=10, controls=[ft.Icon(ft.Icons.NOTES, color=colors["ORANGE"]), ft.Text("Additional Context", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"]) ]), ft.Column(spacing=6, controls=[ft.Text("Disposal Notes", size=12, color=colors["MUTED"]), f_notes]) ]))
 
     left_col = ft.Column(expand=True, scroll=ft.ScrollMode.AUTO, spacing=0, controls=[item_card, logistics_card, notes_card])
 
     # Right panel
-    impact_card = ft.Container(margin=ft.Margin(16, 16, 32, 0), width=300, bgcolor=colors["CARD_BG"], border=ft.Border.all(1, colors["BORDER"]), border_radius=12, shadow=card_shadow(), padding=ft.Padding.all(16), content=ft.Column(spacing=10, controls=[ft.Text("Waste Impact", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"]), ft.Divider(height=1, color=colors["DIVIDER"]), ft.Text("Projected Loss", size=12, color=colors["MUTED"]), t_loss, ft.Text("Item", size=12, color=colors["MUTED"]), t_item_name, ft.Text("Quantity", size=12, color=colors["MUTED"]), t_qty_display, ft.Text("Reason", size=12, color=colors["MUTED"]), t_reason_display, ft.Text("Cost estimated at $10.00/unit", size=11, color=colors["MUTED"]) ]))
+    impact_card = ft.Container(margin=ft.Margin(16, 16, 32, 0), width=300, bgcolor=colors["CARD_BG"], border=ft.Border.all(1, colors["BORDER"]), border_radius=12, shadow=card_shadow(), padding=ft.Padding.all(16), content=ft.Column(spacing=10, controls=[ft.Text("Waste Impact", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"]), ft.Divider(height=1, color=colors["DIVIDER"]), ft.Text("Projected Loss", size=12, color=colors["MUTED"]), t_loss, ft.Text("Price per Amount", size=12, color=colors["MUTED"]), t_unit_price, ft.Text("Item", size=12, color=colors["MUTED"]), t_item_name, ft.Text("Quantity", size=12, color=colors["MUTED"]), t_qty_display, ft.Text("Reason", size=12, color=colors["MUTED"]), t_reason_display]))
 
     action_bar = ft.Container(border=ft.Border(top=ft.BorderSide(1, colors["DIVIDER"])), padding=ft.Padding.symmetric(horizontal=24, vertical=12), content=ft.Row(alignment=ft.MainAxisAlignment.END, controls=[ft.TextButton("Cancel", on_click=on_cancel, style=ft.ButtonStyle(color=colors["MUTED"])), ft.Button("Save Waste Record", on_click=on_save, icon=ft.Icons.SAVE_OUTLINED, style=ft.ButtonStyle(bgcolor=colors["ORANGE"], color="#FFFFFF", elevation=0, shape=ft.RoundedRectangleBorder(radius=8), padding=ft.Padding.symmetric(horizontal=16, vertical=10))) ]))
 
@@ -265,6 +318,7 @@ def waste_new_view(page: ft.Page) -> ft.View:
     # Wire events
     f_item.on_change = on_item_change
     f_qty.on_change = on_qty_change
+    f_cost.on_change = lambda e: (_recalc(), page.update())
     f_unit.on_change = lambda e: (_recalc(), page.update())
     f_reason.on_change = on_reason_change
 

@@ -266,16 +266,23 @@ def login_view(page: ft.Page) -> ft.View:
         conn = sqlite3.connect("reg.db")
         cur = conn.cursor()
         cur.execute(
-            "SELECT username, role FROM users WHERE (username = ? OR email = ?) AND password = ?",
+            "SELECT id, username, role, is_active FROM users WHERE (username = ? OR email = ?) AND password = ?",
             (username, username, password),
         )
         user = cur.fetchone()
+        if user and (user[3] == 0 or user[3] == '0'):
+            error_text.value = "Your account has been deactivated. Please contact your manager."
+            error_text.visible = True
+            conn.close()
+            page.update()
+            return
         conn.close()
 
         if user:
             page.session.store.set("is_logged_in", True)
-            page.session.store.set("username", user[0])
-            page.session.store.set("role", user[1])
+            page.session.store.set("username", user[1])
+            page.session.store.set("role", user[2])
+            page.session.store.set("user_id", user[0])
             page.go("/dashboard")
         else:
             error_text.value = "Invalid credentials. Please check your username and password."

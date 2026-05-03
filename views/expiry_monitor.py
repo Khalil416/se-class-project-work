@@ -142,7 +142,7 @@ def expiry_monitor_view(page: ft.Page) -> ft.View:
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
             (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
         ])
-    nav_items_data.append((ft.Icons.SETTINGS_OUTLINED, "Settings", False, None))
+    # Settings removed (not implemented)
 
     def build_nav_item(icon, label, active=False, route=None):
         text_color = colors["ORANGE"] if active else colors["SIDEBAR_TEXT"]
@@ -357,9 +357,6 @@ def expiry_monitor_view(page: ft.Page) -> ft.View:
         tab_headers.controls = [build_tab_chip("Near Expiry", 0), build_tab_chip("Expired", 1), build_tab_chip("All Items", 2)]
         refresh_table()
 
-    def on_record_waste(e):
-        page.go("/waste/new")
-
     def on_item_click(item_id):
         page.go(f"/item/{item_id}")
 
@@ -406,6 +403,7 @@ def expiry_monitor_view(page: ft.Page) -> ft.View:
             on_item_click(iid)
 
         def on_record(e):
+            page.session.store.set("waste_item_id", item_id)
             page.go("/waste/new")
 
         return ft.Container(
