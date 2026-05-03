@@ -182,6 +182,12 @@ def _get_stats():
 def inventory_view(page: ft.Page) -> ft.View:
     _init_inventory_db()
     colors = LIGHT.copy() if page.theme_mode == ft.ThemeMode.LIGHT else DARK.copy()
+    role = page.session.store.get("role") or "chef"
+
+    def get_role_label(r):
+        """Map role string to display label."""
+        role_map = {"chef": "Kitchen Staff", "inventory_staff": "Inventory Manager", "manager": "General Manager"}
+        return role_map.get(r, "Kitchen Staff")
 
     # State
     current_page = [1]
@@ -214,15 +220,21 @@ def inventory_view(page: ft.Page) -> ft.View:
     )
 
     nav_items_data = [
-        (ft.Icons.SPACE_DASHBOARD_OUTLINED, "Dashboard", False, "/dashboard"),
-        (ft.Icons.INVENTORY_2_OUTLINED, "Inventory", True, "/inventory"),
-        (ft.Icons.TIMER_OUTLINED, "Expiry Monitor", False, None),
-        (ft.Icons.RECEIPT_LONG_OUTLINED, "Waste Logs", False, None),
-        (ft.Icons.BAR_CHART, "Reports", False, None),
-        (ft.Icons.CATEGORY_OUTLINED, "Categories", False, None),
-        (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", False, None),
-        (ft.Icons.SETTINGS_OUTLINED, "Settings", False, None),
+        (ft.Icons.SPACE_DASHBOARD_OUTLINED, "Dashboard", page.route == "/dashboard", "/dashboard"),
+        (ft.Icons.INVENTORY_2_OUTLINED, "Inventory", page.route == "/inventory", "/inventory"),
     ]
+    if role in ("inventory_staff", "manager"):
+        nav_items_data.extend([
+            (ft.Icons.TIMER_OUTLINED, "Expiry Monitor", page.route == "/expiry", "/expiry"),
+            (ft.Icons.RECEIPT_LONG_OUTLINED, "Waste Logs", page.route == "/waste-logs", "/waste-logs"),
+        ])
+    if role == "manager":
+        nav_items_data.extend([
+            (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
+            (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+        ])
+    nav_items_data.append((ft.Icons.SETTINGS_OUTLINED, "Settings", False, None))
 
     def build_nav_item(icon, label, active=False, route=None):
         text_color = colors["ORANGE"] if active else colors["SIDEBAR_TEXT"]
@@ -355,7 +367,7 @@ def inventory_view(page: ft.Page) -> ft.View:
                                     color=colors["TEXT"],
                                 ),
                                 ft.Text(
-                                    "Kitchen Manager", size=12,
+                                    get_role_label(role), size=12,
                                     color=colors["MUTED"],
                                 ),
                             ],
@@ -643,6 +655,9 @@ def inventory_view(page: ft.Page) -> ft.View:
         def on_delete(e, iid=item_id, iname=name):
             show_delete_dialog(iid, iname)
 
+        def on_row_click(e, iid=item_id):
+            page.go(f"/item/{iid}")
+
         actions_cell = ft.Container(
             expand=3,
             content=ft.PopupMenuButton(
@@ -667,6 +682,8 @@ def inventory_view(page: ft.Page) -> ft.View:
         return ft.Container(
             padding=ft.Padding.symmetric(horizontal=20, vertical=10),
             border=ft.Border(bottom=ft.BorderSide(1, colors["DIVIDER"])),
+            ink=True,
+            on_click=on_row_click,
             content=ft.Row(
                 controls=[name_cell, category_cell, quantity_cell, storage_cell, expiry_cell, status_cell, actions_cell],
                 spacing=8,

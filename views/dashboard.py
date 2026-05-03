@@ -57,6 +57,7 @@ DARK = {
 
 def dashboard_view(page: ft.Page) -> ft.View:
     colors = LIGHT.copy() if page.theme_mode == ft.ThemeMode.LIGHT else DARK.copy()
+    role = page.session.store.get("role") or "chef"
 
     # ───────────────────── Helpers ─────────────────────
 
@@ -87,14 +88,20 @@ def dashboard_view(page: ft.Page) -> ft.View:
     )
 
     nav_items_data = [
-        (ft.Icons.SPACE_DASHBOARD_OUTLINED, "Dashboard", True, "/dashboard"),
-        (ft.Icons.INVENTORY_2_OUTLINED, "Inventory", False, "/inventory"),
-        (ft.Icons.TIMER_OUTLINED, "Expiry Monitor", False, None),
-        (ft.Icons.RECEIPT_LONG_OUTLINED, "Waste Logs", False, None),
-        (ft.Icons.BAR_CHART, "Reports", False, None),
-        (ft.Icons.CATEGORY_OUTLINED, "Categories", False, None),
-        (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", False, None),
+        (ft.Icons.SPACE_DASHBOARD_OUTLINED, "Dashboard", page.route == "/dashboard", "/dashboard"),
+        (ft.Icons.INVENTORY_2_OUTLINED, "Inventory", page.route == "/inventory", "/inventory"),
     ]
+    if role in ("inventory_staff", "manager"):
+        nav_items_data.extend([
+            (ft.Icons.TIMER_OUTLINED, "Expiry Monitor", page.route == "/expiry", "/expiry"),
+            (ft.Icons.RECEIPT_LONG_OUTLINED, "Waste Logs", page.route == "/waste-logs", "/waste-logs"),
+        ])
+    if role == "manager":
+        nav_items_data.extend([
+            (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
+            (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+        ])
 
     def build_nav_item(icon, label, active=False, route=None):
         text_color = colors["ORANGE"] if active else colors["SIDEBAR_TEXT"]
@@ -284,9 +291,11 @@ def dashboard_view(page: ft.Page) -> ft.View:
                                 ],
                             ),
                         ),
+                    ] + ([
                         ft.Button(
                             "Record Waste",
                             icon=ft.Icons.ADD,
+                            on_click=lambda e: page.go("/waste/new"),
                             style=ft.ButtonStyle(
                                 bgcolor=colors["ORANGE"],
                                 color="#FFFFFF",
@@ -297,7 +306,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                                 ),
                             ),
                         ),
-                    ],
+                    ] if role in ("chef", "manager") else [])
                 ),
             ],
         ),
