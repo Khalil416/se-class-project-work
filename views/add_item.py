@@ -163,6 +163,12 @@ def _get_item(item_id):
 def add_item_view(page: ft.Page) -> ft.View:
     _ensure_columns()
     colors = LIGHT.copy() if page.theme_mode == ft.ThemeMode.LIGHT else DARK.copy()
+    role = page.session.store.get("role") or "chef"
+
+    def get_role_label(r):
+        """Map role string to display label."""
+        role_map = {"chef": "Kitchen Staff", "inventory_staff": "Inventory Manager", "manager": "General Manager"}
+        return role_map.get(r, "Kitchen Staff")
 
     # Determine if editing
     edit_id = page.session.store.get("edit_item_id")
@@ -213,7 +219,7 @@ def add_item_view(page: ft.Page) -> ft.View:
                             horizontal_alignment=ft.CrossAxisAlignment.END,
                             controls=[
                                 ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
-                                ft.Text("Kitchen Manager", size=12, color=colors["MUTED"]),
+                                ft.Text(get_role_label(role), size=12, color=colors["MUTED"]),
                             ],
                         ),
                         user_avatar,

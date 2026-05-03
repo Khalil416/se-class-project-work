@@ -44,7 +44,57 @@ DARK = {
 }
 
 
+def _init_auth_db():
+    """Initialize users table with schema and seed default manager."""
+    conn = sqlite3.connect("reg.db")
+    cur = conn.cursor()
+    
+    # Create users table if not exists
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL
+        )
+        """
+    )
+    
+    # Migration: add missing columns
+    cur.execute("PRAGMA table_info(users)")
+    existing = {row[1] for row in cur.fetchall()}
+    
+    migrations = [
+        ("role", "TEXT DEFAULT 'chef'"),
+        ("is_active", "INTEGER DEFAULT 1"),
+        ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col, typedef in migrations:
+        if col not in existing:
+            try:
+                cur.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
+            except Exception:
+                pass
+    
+    # Seed default manager if no manager exists
+    try:
+        cur.execute("SELECT id FROM users WHERE role = 'manager' LIMIT 1")
+        has_manager = cur.fetchone() is not None
+        if not has_manager:
+            cur.execute(
+                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, ?)",
+                ("manager", "manager@kitchen.local", "1234", "manager", 1),
+            )
+    except Exception:
+        pass
+    
+    conn.commit()
+    conn.close()
+
+
 def login_view(page: ft.Page) -> ft.View:
+    _init_auth_db()  # Initialize DB schema and seed manager on first load
     colors = LIGHT.copy() if page.theme_mode == ft.ThemeMode.LIGHT else DARK.copy()
     logo = ft.Image(
         src="assets/logo.png",
@@ -216,7 +266,7 @@ def login_view(page: ft.Page) -> ft.View:
         conn = sqlite3.connect("reg.db")
         cur = conn.cursor()
         cur.execute(
-            "SELECT username FROM users WHERE (username = ? OR email = ?) AND password = ?",
+            "SELECT username, role FROM users WHERE (username = ? OR email = ?) AND password = ?",
             (username, username, password),
         )
         user = cur.fetchone()
@@ -225,6 +275,7 @@ def login_view(page: ft.Page) -> ft.View:
         if user:
             page.session.store.set("is_logged_in", True)
             page.session.store.set("username", user[0])
+            page.session.store.set("role", user[1])
             page.go("/dashboard")
         else:
             error_text.value = "Invalid credentials. Please check your username and password."
@@ -377,14 +428,6 @@ def login_view(page: ft.Page) -> ft.View:
                                     secure_icon,
                                     secure_text,
                                 ],
-                            ),
-                            ft.TextButton(
-                                "Don't have an account? Register",
-                                on_click=lambda e: page.go("/register"),
-                                style=ft.ButtonStyle(
-                                    color=colors["ORANGE"],
-                                    text_style=ft.TextStyle(size=13, weight=ft.FontWeight.W_600),
-                                ),
                             ),
                         ],
                     ),
