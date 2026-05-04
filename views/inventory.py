@@ -232,7 +232,7 @@ def inventory_view(page: ft.Page) -> ft.View:
         nav_items_data.extend([
             (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
-            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users", page.route == "/users", "/users"),
         ])
     # Settings removed (not implemented)
 
@@ -352,28 +352,26 @@ def inventory_view(page: ft.Page) -> ft.View:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 top_search,
-                ft.Row(
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Icon(ft.Icons.NOTIFICATIONS_NONE, size=22, color=colors["MUTED"]),
-                        ft.Column(
-                            spacing=0,
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            controls=[
-                                ft.Text(
-                                    username, size=14,
-                                    weight=ft.FontWeight.W_600,
-                                    color=colors["TEXT"],
-                                ),
-                                ft.Text(
-                                    get_role_label(role), size=12,
-                                    color=colors["MUTED"],
-                                ),
-                            ],
-                        ),
-                        user_avatar,
-                    ],
+                ft.Container(
+                    ink=True,
+                    on_click=lambda e: page.go("/account"),
+                    border_radius=10,
+                    padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                    content=ft.Row(
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Column(
+                                spacing=0,
+                                horizontal_alignment=ft.CrossAxisAlignment.END,
+                                controls=[
+                                    ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                                    ft.Text(get_role_label(role), size=12, color=colors["MUTED"]),
+                                ],
+                            ),
+                            user_avatar,
+                        ],
+                    ),
                 ),
             ],
         ),
@@ -423,17 +421,6 @@ def inventory_view(page: ft.Page) -> ft.View:
                         padding=ft.Padding.symmetric(
                             horizontal=20, vertical=12,
                         ),
-                    ),
-                ),
-                ft.OutlinedButton(
-                    "Record Waste",
-                    icon=ft.Icons.DELETE_OUTLINE,
-                    on_click=open_waste_page,
-                    style=ft.ButtonStyle(
-                        color=colors["ORANGE"],
-                        side=ft.BorderSide(1, colors["ORANGE"]),
-                        shape=ft.RoundedRectangleBorder(radius=8),
-                        padding=ft.Padding.symmetric(horizontal=20, vertical=12),
                     ),
                 ),
             ],

@@ -69,6 +69,22 @@ def _get_item(item_id):
     return row
 
 
+def _get_waste_history(item_id):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT qty_wasted, unit, reason, cost_estimate, waste_date FROM waste_logs WHERE item_id=? ORDER BY waste_date DESC",
+            (item_id,),
+        )
+        rows = cur.fetchall()
+    except Exception:
+        rows = []
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def _update_quantity(item_id, new_qty):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -162,7 +178,7 @@ def item_detail_view(page: ft.Page, item_id: int) -> ft.View:
         nav_items_data.extend([
             (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
-            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users", page.route == "/users", "/users"),
         ])
     # Settings removed (not implemented)
 
@@ -279,21 +295,26 @@ def item_detail_view(page: ft.Page, item_id: int) -> ft.View:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 top_search,
-                ft.Row(
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Icon(ft.Icons.NOTIFICATIONS_NONE, size=22, color=colors["MUTED"]),
-                        ft.Column(
-                            spacing=0,
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            controls=[
-                                ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
-                                ft.Text(get_role_label(role), size=12, color=colors["MUTED"]),
-                            ],
-                        ),
-                        user_avatar,
-                    ],
+                ft.Container(
+                    ink=True,
+                    on_click=lambda e: page.go("/account"),
+                    border_radius=10,
+                    padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                    content=ft.Row(
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Column(
+                                spacing=0,
+                                horizontal_alignment=ft.CrossAxisAlignment.END,
+                                controls=[
+                                    ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                                    ft.Text(get_role_label(role), size=12, color=colors["MUTED"]),
+                                ],
+                            ),
+                            user_avatar,
+                        ],
+                    ),
                 ),
             ],
         ),
@@ -344,6 +365,25 @@ def item_detail_view(page: ft.Page, item_id: int) -> ft.View:
     def on_record_waste(e):
         page.session.store.set("waste_item_id", item_id)
         page.go("/waste/new")
+
+    def on_mark_as_used(e):
+        _update_quantity(item_id, 0)
+        current_qty[0] = 0.0
+        stock_value_text.value = f"0 {unit}"
+        page.snack_bar = ft.SnackBar(
+            ft.Text("Item marked as fully used", color="#FFFFFF"),
+            bgcolor=colors["GREEN"],
+        )
+        page.snack_bar.open = True
+        page.update()
+
+    def on_search_submit(e):
+        val = (top_search.value or "").strip()
+        if val:
+            page.session.store.set("global_search", val)
+            page.go("/inventory")
+
+    top_search.on_submit = on_search_submit
 
     def show_update_stock_dialog():
         action_type = ["restock"]
@@ -823,10 +863,12 @@ def item_detail_view(page: ft.Page, item_id: int) -> ft.View:
                                 ft.PopupMenuItem(
                                     content=ft.Text("Mark as Used"),
                                     icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
+                                    on_click=on_mark_as_used,
                                 ),
                                 ft.PopupMenuItem(
                                     content=ft.Text("Record Waste"),
                                     icon=ft.Icons.DELETE_OUTLINE,
+                                    on_click=on_record_waste,
                                 ),
                             ],
                         ),
@@ -851,11 +893,61 @@ def item_detail_view(page: ft.Page, item_id: int) -> ft.View:
             ),
         )
 
+    def build_waste_history_tab():
+        rows = _get_waste_history(item_id)
+        if not rows:
+            return build_empty_state("No waste history yet")
+        header = ft.Container(
+            bgcolor=colors["TABLE_HEADER_BG"],
+            padding=ft.Padding.symmetric(horizontal=20, vertical=12),
+            border=ft.Border(bottom=ft.BorderSide(1, colors["DIVIDER"])),
+            content=ft.Row(spacing=8, controls=[
+                ft.Container(expand=20, content=ft.Text("Date", size=12, color=colors["MUTED"], weight=ft.FontWeight.W_600)),
+                ft.Container(expand=15, content=ft.Text("Quantity", size=12, color=colors["MUTED"], weight=ft.FontWeight.W_600)),
+                ft.Container(expand=20, content=ft.Text("Reason", size=12, color=colors["MUTED"], weight=ft.FontWeight.W_600)),
+                ft.Container(expand=15, content=ft.Text("Cost", size=12, color=colors["MUTED"], weight=ft.FontWeight.W_600)),
+            ]),
+        )
+        reason_colors = {
+            "expired": colors["RED"], "spoiled": colors["ORANGE"],
+            "prep_waste": "#B8860B", "overproduction": "#1D4ED8",
+            "damaged": colors["MUTED"], "other": colors["MUTED"],
+        }
+        reason_bgs = {
+            "expired": colors["RED_BG"], "spoiled": colors["ORANGE_BG"],
+            "prep_waste": "#FFF4CC", "overproduction": "#DBEAFE",
+            "damaged": colors["DIVIDER"], "other": colors["DIVIDER"],
+        }
+        data_rows = []
+        for r in rows:
+            reason_key = (r.get("reason") or "other").lower()
+            reason_label = reason_key.replace("_", " ").title()
+            fg = reason_colors.get(reason_key, colors["MUTED"])
+            bg = reason_bgs.get(reason_key, colors["DIVIDER"])
+            cost = float(r.get("cost_estimate") or 0)
+            data_rows.append(
+                ft.Container(
+                    padding=ft.Padding.symmetric(horizontal=20, vertical=12),
+                    border=ft.Border(bottom=ft.BorderSide(1, colors["DIVIDER"])),
+                    content=ft.Row(spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[
+                        ft.Container(expand=20, content=ft.Text(r.get("waste_date", "—")[:10], size=13, color=colors["TEXT_SECONDARY"])),
+                        ft.Container(expand=15, content=ft.Text(f"{r.get('qty_wasted', 0)} {r.get('unit', '')}", size=13, color=colors["TEXT"])),
+                        ft.Container(expand=20, content=ft.Container(
+                            padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+                            bgcolor=bg, border_radius=4,
+                            content=ft.Text(reason_label, size=11, color=fg, weight=ft.FontWeight.W_600),
+                        )),
+                        ft.Container(expand=15, content=ft.Text(f"${cost:,.2f}", size=13, color=colors["TEXT"], weight=ft.FontWeight.W_500)),
+                    ]),
+                )
+            )
+        return ft.Column(spacing=0, controls=[header] + data_rows)
+
     def get_tab_content(idx):
         if idx == 0:
             return build_expiry_batches_tab()
         elif idx == 1:
-            return build_empty_state("No waste history yet")
+            return build_waste_history_tab()
         else:
             return build_empty_state("No activity recorded yet")
 

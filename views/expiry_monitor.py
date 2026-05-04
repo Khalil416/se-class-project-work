@@ -140,7 +140,7 @@ def expiry_monitor_view(page: ft.Page) -> ft.View:
         nav_items_data.extend([
             (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
-            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users", page.route == "/users", "/users"),
         ])
     # Settings removed (not implemented)
 
@@ -212,6 +212,29 @@ def expiry_monitor_view(page: ft.Page) -> ft.View:
     role = page.session.store.get("role") or "Kitchen Staff"
     initials = username[:2].upper()
 
+    topbar_search = ft.TextField(
+        hint_text="Search items, batches, or expiry dates...",
+        width=400,
+        height=42,
+        border_radius=10,
+        border_color=colors["SEARCH_BORDER"],
+        focused_border_color=colors["ORANGE"],
+        bgcolor=colors["SEARCH_BG"],
+        prefix_icon=ft.Icons.SEARCH,
+        content_padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+        text_size=14,
+        color=colors["TEXT"],
+        cursor_color=colors["ORANGE"],
+    )
+
+    def on_topbar_search_submit(e):
+        val = (topbar_search.value or "").strip()
+        if val:
+            page.session.store.set("global_search", val)
+            page.go("/inventory")
+
+    topbar_search.on_submit = on_topbar_search_submit
+
     top_bar = ft.Container(
         padding=ft.Padding.symmetric(horizontal=32, vertical=14),
         border=ft.Border(bottom=ft.BorderSide(1, colors["BORDER"])),
@@ -220,42 +243,27 @@ def expiry_monitor_view(page: ft.Page) -> ft.View:
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
-                ft.TextField(
-                    hint_text="Search items, batches, or expiry dates...",
-                    width=400,
-                    height=42,
+                topbar_search,
+                ft.Container(
+                    ink=True,
+                    on_click=lambda e: page.go("/account"),
                     border_radius=10,
-                    border_color=colors["SEARCH_BORDER"],
-                    focused_border_color=colors["ORANGE"],
-                    bgcolor=colors["SEARCH_BG"],
-                    prefix_icon=ft.Icons.SEARCH,
-                    content_padding=ft.Padding.symmetric(horizontal=14, vertical=8),
-                    text_size=14,
-                    color=colors["TEXT"],
-                    cursor_color=colors["ORANGE"],
-                ),
-                ft.Row(
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Icon(ft.Icons.NOTIFICATIONS_NONE, size=22, color=colors["MUTED"]),
-                        ft.Column(
-                            spacing=0,
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            controls=[
-                                ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
-                                ft.Text(role, size=12, color=colors["MUTED"]),
-                            ],
-                        ),
-                        ft.Container(
-                            width=38,
-                            height=38,
-                            bgcolor=colors["AVATAR_BG"],
-                            border_radius=19,
-                            alignment=ft.Alignment(0, 0),
-                            content=ft.Text(initials, size=14, weight=ft.FontWeight.W_600, color=colors["ORANGE"]),
-                        ),
-                    ],
+                    padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                    content=ft.Row(
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Column(
+                                spacing=0,
+                                horizontal_alignment=ft.CrossAxisAlignment.END,
+                                controls=[
+                                    ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                                    ft.Text(role, size=12, color=colors["MUTED"]),
+                                ],
+                            ),
+                            ft.Container(width=38, height=38, bgcolor=colors["AVATAR_BG"], border_radius=19, alignment=ft.Alignment(0, 0), content=ft.Text(initials, size=14, weight=ft.FontWeight.W_600, color=colors["ORANGE"])),
+                        ],
+                    ),
                 ),
             ],
         ),
@@ -479,63 +487,6 @@ def expiry_monitor_view(page: ft.Page) -> ft.View:
         ),
     )
 
-    info_cards_row = ft.Container(
-        margin=ft.Margin(32, 16, 32, 16),
-        content=ft.Row(
-            spacing=16,
-            controls=[
-                ft.Container(
-                    expand=True,
-                    bgcolor=colors["CARD_BG"],
-                    border=ft.Border.all(1, colors["BORDER"]),
-                    border_radius=12,
-                    shadow=card_shadow(),
-                    padding=ft.Padding.all(20),
-                    content=ft.Column(
-                        spacing=12,
-                        controls=[
-                            ft.Row(spacing=8, controls=[ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, size=16, color=colors["MUTED"]), ft.Text("Waste Prevention", size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"])]),
-                            ft.Divider(height=1, color=colors["DIVIDER"]),
-                            ft.Text("Spot items before they expire and reduce unnecessary spoilage.", size=13, color=colors["TEXT_SECONDARY"]),
-                        ],
-                    ),
-                ),
-                ft.Container(
-                    expand=True,
-                    bgcolor=colors["CARD_BG"],
-                    border=ft.Border.all(1, colors["BORDER"]),
-                    border_radius=12,
-                    shadow=card_shadow(),
-                    padding=ft.Padding.all(20),
-                    content=ft.Column(
-                        spacing=12,
-                        controls=[
-                            ft.Row(spacing=8, controls=[ft.Icon(ft.Icons.NOTIFICATIONS_ACTIVE_OUTLINED, size=16, color=colors["MUTED"]), ft.Text("Staff Alerts", size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"])]),
-                            ft.Divider(height=1, color=colors["DIVIDER"]),
-                            ft.Text("Keep teams aware of near-expiry stock that needs attention.", size=13, color=colors["TEXT_SECONDARY"]),
-                        ],
-                    ),
-                ),
-                ft.Container(
-                    expand=True,
-                    bgcolor=colors["CARD_BG"],
-                    border=ft.Border.all(1, colors["BORDER"]),
-                    border_radius=12,
-                    shadow=card_shadow(),
-                    padding=ft.Padding.all(20),
-                    content=ft.Column(
-                        spacing=12,
-                        controls=[
-                            ft.Row(spacing=8, controls=[ft.Icon(ft.Icons.STORAGE_OUTLINED, size=16, color=colors["MUTED"]), ft.Text("Data Logging", size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"])]),
-                            ft.Divider(height=1, color=colors["DIVIDER"]),
-                            ft.Text("Track expiry status over time to support better kitchen decisions.", size=13, color=colors["TEXT_SECONDARY"]),
-                        ],
-                    ),
-                ),
-            ],
-        ),
-    )
-
     title_block = ft.Container(
         padding=ft.Padding.only(left=32, right=32, top=24, bottom=8),
         content=ft.Column(
@@ -572,6 +523,7 @@ def expiry_monitor_view(page: ft.Page) -> ft.View:
         bgcolor=colors["BG"],
         content=ft.Column(
             expand=True,
+            scroll=ft.ScrollMode.AUTO,
             spacing=0,
             controls=[
                 top_bar,
@@ -579,8 +531,6 @@ def expiry_monitor_view(page: ft.Page) -> ft.View:
                 content_header,
                 filters_row,
                 table_card,
-                info_cards_row,
-                ft.Container(expand=True),
                 footer,
             ],
         ),

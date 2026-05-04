@@ -214,6 +214,11 @@ def dashboard_view(page: ft.Page) -> ft.View:
 
     # ───────────────────── SIDEBAR ─────────────────────
 
+    def _get_role_label(r):
+        return {"chef": "Kitchen Staff", "inventory_staff": "Inventory Manager", "manager": "General Manager"}.get(r, "Kitchen Staff")
+
+    today_date = date.today()
+
     logo_icon = ft.Image(
         src="assets/logo.png",
         width=36,
@@ -243,7 +248,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
         nav_items_data.extend([
             (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
-            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users", page.route == "/users", "/users"),
         ])
 
     def build_nav_item(icon, label, active=False, route=None):
@@ -254,15 +259,10 @@ def dashboard_view(page: ft.Page) -> ft.View:
 
         row_controls = [
             ft.Icon(icon, size=20, color=icon_color),
-            ft.Text(
-                label, size=14, color=text_color,
-                weight=weight, expand=True,
-            ),
+            ft.Text(label, size=14, color=text_color, weight=weight, expand=True),
         ]
         if active:
-            row_controls.append(
-                ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color=icon_color)
-            )
+            row_controls.append(ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color=icon_color))
 
         def nav_click(e, r=route):
             if r:
@@ -277,10 +277,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
             on_click=nav_click if route and not active else None,
         )
 
-    nav_column = ft.Column(
-        spacing=2,
-        controls=[build_nav_item(i, l, a, r) for i, l, a, r in nav_items_data],
-    )
+    nav_column = ft.Column(spacing=2, controls=[build_nav_item(i, l, a, r) for i, l, a, r in nav_items_data])
 
     def on_sign_out(e):
         page.session.store.clear()
@@ -337,6 +334,14 @@ def dashboard_view(page: ft.Page) -> ft.View:
         cursor_color=colors["ORANGE"],
     )
 
+    def on_search_submit(e):
+        val = (search_field.value or "").strip()
+        if val:
+            page.session.store.set("global_search", val)
+            page.go("/inventory")
+
+    search_field.on_submit = on_search_submit
+
     username = page.session.store.get("username") or "User"
     initials = username[:2].upper()
 
@@ -362,27 +367,26 @@ def dashboard_view(page: ft.Page) -> ft.View:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 search_field,
-                ft.Row(
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Column(
-                            spacing=0,
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            controls=[
-                                ft.Text(
-                                    username, size=14,
-                                    weight=ft.FontWeight.W_600,
-                                    color=colors["TEXT"],
-                                ),
-                                ft.Text(
-                                    "Head Manager", size=12,
-                                    color=colors["MUTED"],
-                                ),
-                            ],
-                        ),
-                        user_avatar,
-                    ],
+                ft.Container(
+                    ink=True,
+                    on_click=lambda e: page.go("/account"),
+                    border_radius=10,
+                    padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                    content=ft.Row(
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Column(
+                                spacing=0,
+                                horizontal_alignment=ft.CrossAxisAlignment.END,
+                                controls=[
+                                    ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                                    ft.Text(_get_role_label(role), size=12, color=colors["MUTED"]),
+                                ],
+                            ),
+                            user_avatar,
+                        ],
+                    ),
                 ),
             ],
         ),
@@ -413,28 +417,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                 ft.Row(
                     spacing=14,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Container(
-                            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
-                            border=ft.Border.all(1, colors["BORDER"]),
-                            border_radius=8,
-                            bgcolor=colors["CARD_BG"],
-                            content=ft.Row(
-                                spacing=8,
-                                controls=[
-                                    ft.Icon(
-                                        ft.Icons.CALENDAR_TODAY_OUTLINED,
-                                        size=16, color=colors["MUTED"],
-                                    ),
-                                    ft.Text(
-                                        "Oct 18 - Oct 25", size=13,
-                                        color=colors["TEXT"],
-                                        weight=ft.FontWeight.W_500,
-                                    ),
-                                ],
-                            ),
-                        ),
-                    ] + ([
+                    controls=([ ] + [
                         ft.Button(
                             "Record Waste",
                             icon=ft.Icons.ADD,
@@ -669,6 +652,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
     min_y=0,
     max_y=max(target_y * 2, 10),
     height=200,
+    
     expand=True,
         bgcolor="transparent",
         horizontal_grid_lines=fch.ChartGridLines(
@@ -733,11 +717,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                         on_track_badge,
                     ],
                 ),
-                ft.Container(
-                    expand=True,
-                    clip_behavior=ft.ClipBehavior.HARD_EDGE,
-                    content=trend_chart,
-                ),
+                trend_chart,
             ],
         ),
     )
@@ -857,6 +837,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                             ],
                         ),
                         ft.TextButton(
+                            on_click=lambda e: page.go("/expiry"),
                             content=ft.Row(
                                 spacing=4,
                                 controls=[
@@ -1013,6 +994,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                             ],
                         ),
                         ft.TextButton(
+                            on_click=lambda e: page.go("/waste-logs"),
                             content=ft.Row(
                                 spacing=4,
                                 controls=[

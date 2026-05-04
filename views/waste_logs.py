@@ -101,9 +101,10 @@ def _fetch_waste_logs(search_text="", date_from="", date_to="", reason="All Reas
         like = f"%{search_text}%"
         query += " AND (wl.reason LIKE ? OR i.item_name LIKE ? OR i.category LIKE ? OR wl.unit LIKE ? OR CAST(wl.qty_wasted AS TEXT) LIKE ?)"
         params.extend([like, like, like, like, like])
-    if reason and reason != "All Reasons":
-        query += " AND wl.reason = ?"
-        params.append(reason)
+    # Apply reason filter (dropdown sends lowercase keys: expired, spoiled, etc.)
+    if reason and reason not in ("All Reasons",):
+        query += " AND LOWER(wl.reason) = ?"
+        params.append(reason.lower())
     query += " ORDER BY wl.waste_date DESC, wl.log_id DESC"
     cur.execute(query, params)
     rows = [dict(row) for row in cur.fetchall()]
@@ -185,7 +186,7 @@ def waste_logs_view(page: ft.Page) -> ft.View:
         nav_items_data.extend([
             (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
-            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users", page.route == "/users", "/users"),
         ])
     # Settings removed (not implemented)
 
@@ -233,6 +234,29 @@ def waste_logs_view(page: ft.Page) -> ft.View:
     username = page.session.store.get("username") or "User"
     initials = username[:2].upper()
 
+    topbar_search = ft.TextField(
+        hint_text="Search waste logs, items, reasons...",
+        width=400,
+        height=42,
+        border_radius=10,
+        border_color=colors["SEARCH_BORDER"],
+        focused_border_color=colors["ORANGE"],
+        bgcolor=colors["SEARCH_BG"],
+        prefix_icon=ft.Icons.SEARCH,
+        content_padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+        text_size=14,
+        color=colors["TEXT"],
+        cursor_color=colors["ORANGE"],
+    )
+
+    def on_topbar_search_submit(e):
+        val = (topbar_search.value or "").strip()
+        if val:
+            page.session.store.set("global_search", val)
+            page.go("/inventory")
+
+    topbar_search.on_submit = on_topbar_search_submit
+
     top_bar = ft.Container(
         padding=ft.Padding.symmetric(horizontal=32, vertical=14),
         border=ft.Border(bottom=ft.BorderSide(1, colors["BORDER"])),
@@ -241,40 +265,32 @@ def waste_logs_view(page: ft.Page) -> ft.View:
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
-                ft.TextField(
-                    hint_text="Search waste logs, items, reasons...",
-                    width=400,
-                    height=42,
-                    border_radius=10,
-                    border_color=colors["SEARCH_BORDER"],
-                    focused_border_color=colors["ORANGE"],
-                    bgcolor=colors["SEARCH_BG"],
-                    prefix_icon=ft.Icons.SEARCH,
-                    content_padding=ft.Padding.symmetric(horizontal=14, vertical=8),
-                    text_size=14,
-                    color=colors["TEXT"],
-                    cursor_color=colors["ORANGE"],
-                ),
+                topbar_search,
                 ft.Row(
                     spacing=12,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         ft.Icon(ft.Icons.NOTIFICATIONS_NONE, size=22, color=colors["MUTED"]),
-                        ft.Column(
-                            spacing=0,
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            controls=[
-                                ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
-                                ft.Text(page.session.store.get("role") or "Kitchen Staff", size=12, color=colors["MUTED"]),
-                            ],
-                        ),
                         ft.Container(
-                            width=38,
-                            height=38,
-                            bgcolor=colors["AVATAR_BG"],
-                            border_radius=19,
-                            alignment=ft.Alignment(0, 0),
-                            content=ft.Text(initials, size=14, weight=ft.FontWeight.W_600, color=colors["ORANGE"]),
+                            ink=True,
+                            on_click=lambda e: page.go("/account"),
+                            border_radius=10,
+                            padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                            content=ft.Row(
+                                spacing=12,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    ft.Column(
+                                        spacing=0,
+                                        horizontal_alignment=ft.CrossAxisAlignment.END,
+                                        controls=[
+                                            ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                                            ft.Text(page.session.store.get("role") or "Kitchen Staff", size=12, color=colors["MUTED"]),
+                                        ],
+                                    ),
+                                    ft.Container(width=38, height=38, bgcolor=colors["AVATAR_BG"], border_radius=19, alignment=ft.Alignment(0, 0), content=ft.Text(initials, size=14, weight=ft.FontWeight.W_600, color=colors["ORANGE"])),
+                                ],
+                            ),
                         ),
                     ],
                 ),
@@ -284,11 +300,29 @@ def waste_logs_view(page: ft.Page) -> ft.View:
 
     title_block = ft.Container(
         padding=ft.Padding.only(left=32, right=32, top=24, bottom=8),
-        content=ft.Column(
-            spacing=4,
+        content=ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
-                ft.Text("Waste Logs", size=26, weight=ft.FontWeight.W_700, color=colors["TEXT"]),
-                ft.Text("Audit trail of all food waste events and costs", size=14, color=colors["MUTED"]),
+                ft.Column(
+                    spacing=4,
+                    controls=[
+                        ft.Text("Waste Logs", size=26, weight=ft.FontWeight.W_700, color=colors["TEXT"]),
+                        ft.Text("Audit trail of all food waste events and costs", size=14, color=colors["MUTED"]),
+                    ],
+                ),
+                ft.Button(
+                    "+ Record Waste",
+                    icon=ft.Icons.ADD,
+                    on_click=lambda e: page.go("/waste/new"),
+                    style=ft.ButtonStyle(
+                        bgcolor=colors["ORANGE"],
+                        color="#FFFFFF",
+                        elevation=0,
+                        shape=ft.RoundedRectangleBorder(radius=8),
+                        padding=ft.Padding.symmetric(horizontal=20, vertical=12),
+                    ),
+                ),
             ],
         ),
     )
@@ -310,26 +344,7 @@ def waste_logs_view(page: ft.Page) -> ft.View:
 
     date_from = ft.TextField(hint_text="From YYYY-MM-DD", width=160, height=42, border_radius=8, border_color=colors["BORDER"], focused_border_color=colors["ORANGE"], bgcolor=colors["CARD_BG"], text_size=14, color=colors["TEXT"], cursor_color=colors["ORANGE"])
     date_to = ft.TextField(hint_text="To YYYY-MM-DD", width=160, height=42, border_radius=8, border_color=colors["BORDER"], focused_border_color=colors["ORANGE"], bgcolor=colors["CARD_BG"], text_size=14, color=colors["TEXT"], cursor_color=colors["ORANGE"])
-    reason_filter = ft.Dropdown(
-        value="All Reasons",
-        width=190,
-        height=42,
-        border_radius=8,
-        border_color=colors["BORDER"],
-        focused_border_color=colors["ORANGE"],
-        bgcolor=colors["CARD_BG"],
-        text_size=14,
-        color=colors["TEXT"],
-        options=[
-            ft.DropdownOption(key="All Reasons", text="All Reasons"),
-            ft.DropdownOption(key="expired", text="Expired"),
-            ft.DropdownOption(key="spoiled", text="Spoiled"),
-            ft.DropdownOption(key="prep_waste", text="Prep Waste"),
-            ft.DropdownOption(key="overproduction", text="Overproduction"),
-            ft.DropdownOption(key="damaged", text="Damaged"),
-            ft.DropdownOption(key="other", text="Other"),
-        ],
-    )
+    # Reason filter removed (non-functional)
 
     def parse_date(value):
         if not value:
@@ -445,7 +460,6 @@ def waste_logs_view(page: ft.Page) -> ft.View:
             controls=[
                 search_field,
                 ft.Row(spacing=8, controls=[date_from, date_to]),
-                reason_filter,
             ],
         ),
     )
@@ -603,7 +617,7 @@ def waste_logs_view(page: ft.Page) -> ft.View:
 
     def refresh_table():
         search_text = (search_field.value or "").strip().lower()
-        rows = _fetch_waste_logs(search_text=search_text, date_from=date_from.value or "", date_to=date_to.value or "", reason=reason_filter.value or "All Reasons")
+        rows = _fetch_waste_logs(search_text=search_text, date_from=date_from.value or "", date_to=date_to.value or "")
         refresh_metrics(rows)
 
         total = len(rows)
@@ -637,14 +651,9 @@ def waste_logs_view(page: ft.Page) -> ft.View:
         current_page[0] = 1
         refresh_table()
 
-    def on_reason_change(e):
-        current_page[0] = 1
-        refresh_table()
-
     search_field.on_change = on_search_change
     date_from.on_change = on_date_change
     date_to.on_change = on_date_change
-    reason_filter.on_change = on_reason_change
 
     table_card = ft.Container(
         margin=ft.Margin(32, 8, 32, 0),
@@ -653,23 +662,6 @@ def waste_logs_view(page: ft.Page) -> ft.View:
         border_radius=12,
         shadow=card_shadow(),
         content=ft.Column(spacing=0, controls=[table_body, ft.Container(padding=ft.Padding.symmetric(horizontal=20, vertical=12), content=pagination_row)]),
-    )
-
-    bottom_insight = ft.Container(
-        margin=ft.Margin(32, 16, 32, 16),
-        bgcolor=colors["CARD_BG"],
-        border=ft.Border.all(1, colors["BORDER"]),
-        border_radius=12,
-        shadow=card_shadow(),
-        padding=ft.Padding.all(20),
-        content=ft.Column(
-            spacing=10,
-            controls=[
-                ft.Row(spacing=8, controls=[ft.Icon(ft.Icons.INSIGHTS_OUTLINED, size=16, color=colors["MUTED"]), ft.Text("Insight", size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"])]),
-                ft.Divider(height=1, color=colors["DIVIDER"]),
-                insight_text,
-            ],
-        ),
     )
 
     footer = ft.Container(
@@ -683,6 +675,7 @@ def waste_logs_view(page: ft.Page) -> ft.View:
         bgcolor=colors["BG"],
         content=ft.Column(
             expand=True,
+            scroll=ft.ScrollMode.AUTO,
             spacing=0,
             controls=[
                 top_bar,
@@ -690,11 +683,9 @@ def waste_logs_view(page: ft.Page) -> ft.View:
                 metric_row,
                 ft.Container(
                     padding=ft.Padding.symmetric(horizontal=32, vertical=4),
-                    content=ft.Row(spacing=12, controls=[search_field, date_from, date_to, reason_filter]),
+                    content=ft.Row(spacing=12, controls=[search_field, date_from, date_to]),
                 ),
                 table_card,
-                bottom_insight,
-                ft.Container(expand=True),
                 footer,
             ],
         ),

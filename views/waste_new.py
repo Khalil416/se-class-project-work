@@ -94,6 +94,33 @@ def waste_new_view(page: ft.Page) -> ft.View:
     role = page.session.store.get("role") or "chef"
     prefill_item_id = page.session.store.get("waste_item_id")
 
+    if role != "manager":
+        def close_dialog(e):
+            page.pop_dialog()
+            page.go("/inventory")
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Access Denied", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+            content=ft.Text("You dont have access for it", size=14, color=colors["TEXT_SECONDARY"]),
+            actions=[
+                ft.Button(
+                    "Back to Inventory",
+                    on_click=close_dialog,
+                    style=ft.ButtonStyle(bgcolor=colors["ORANGE"], color="#FFFFFF"),
+                )
+            ],
+            bgcolor=colors["CARD_BG"],
+        )
+        page.show_dialog(dlg)
+        return ft.View(
+            route="/waste/new",
+            padding=0,
+            spacing=0,
+            bgcolor=colors["BG"],
+            controls=[],
+        )
+
     def get_role_label(r):
         """Map role string to display label."""
         role_map = {"chef": "Kitchen Staff", "inventory_staff": "Inventory Manager", "manager": "General Manager"}
@@ -260,31 +287,43 @@ def waste_new_view(page: ft.Page) -> ft.View:
         if page.session.store.contains_key("waste_item_id"):
             page.session.store.remove("waste_item_id")
 
-        page.go("/inventory")
+        page.go("/waste-logs")
 
     # Layout pieces
-    # Sidebar (simplified re-use)
+    # Sidebar
     logo_icon = ft.Image(src="assets/logo.png", width=36, height=36, fit=ft.BoxFit.CONTAIN)
-    logo_text = ft.Text("Kitchen Food Waste", size=15, weight=ft.FontWeight.W_700, color=colors["TEXT"]) 
+    logo_text = ft.Text("Kitchen Food Waste", size=15, weight=ft.FontWeight.W_700, color=colors["TEXT"])
 
-    nav_items = [
-        (ft.Icons.SPACE_DASHBOARD_OUTLINED, "Dashboard", "/dashboard"),
-        (ft.Icons.INVENTORY_2_OUTLINED, "Inventory", "/inventory"),
-        (ft.Icons.RECEIPT_LONG_OUTLINED, "Waste Logs", "/waste-logs"),
-        (ft.Icons.TIMER_OUTLINED, "Expiry Monitor", "/expiry"),
-        (ft.Icons.BAR_CHART, "Reports", "/reports"),
+    nav_items_data = [
+        (ft.Icons.SPACE_DASHBOARD_OUTLINED, "Dashboard", False, "/dashboard"),
+        (ft.Icons.INVENTORY_2_OUTLINED, "Inventory", False, "/inventory"),
     ]
+    if role in ("inventory_staff", "manager"):
+        nav_items_data.extend([
+            (ft.Icons.TIMER_OUTLINED, "Expiry Monitor", False, "/expiry"),
+            (ft.Icons.RECEIPT_LONG_OUTLINED, "Waste Logs", False, "/waste-logs"),
+        ])
+    if role == "manager":
+        nav_items_data.extend([
+            (ft.Icons.BAR_CHART, "Reports", False, "/reports"),
+            (ft.Icons.CATEGORY_OUTLINED, "Categories", False, "/categories"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users", False, "/users"),
+        ])
 
-    def build_nav_item(icon, label, route=None, active=False):
+    def build_nav_item(icon, label, active=False, route=None):
         text_color = colors["ORANGE"] if active else colors["SIDEBAR_TEXT"]
         icon_color = colors["ORANGE"] if active else colors["SIDEBAR_ICON"]
         bg = colors["SIDEBAR_ACTIVE_BG"] if active else "transparent"
-        row_controls = [ft.Icon(icon, size=20, color=icon_color), ft.Text(label, size=14, color=text_color, expand=True)]
+        weight = ft.FontWeight.W_600 if active else ft.FontWeight.W_400
+        row_controls = [ft.Icon(icon, size=20, color=icon_color), ft.Text(label, size=14, color=text_color, weight=weight, expand=True)]
         if active:
             row_controls.append(ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color=icon_color))
-        return ft.Container(padding=ft.Padding.symmetric(horizontal=14, vertical=10), bgcolor=bg, border_radius=8, content=ft.Row(spacing=12, controls=row_controls), ink=True, on_click=(lambda e: page.go(route)) if route else None)
+        def nav_click(e, r=route):
+            if r:
+                page.go(r)
+        return ft.Container(padding=ft.Padding.symmetric(horizontal=14, vertical=10), bgcolor=bg, border_radius=8, content=ft.Row(spacing=12, controls=row_controls), ink=True, on_click=nav_click if route else None)
 
-    nav_column = ft.Column(spacing=2, controls=[build_nav_item(i, l, r, True if l=="Waste Logs" else False) for i, l, r in nav_items])
+    nav_column = ft.Column(spacing=2, controls=[build_nav_item(i, l, a, r) for i, l, a, r in nav_items_data])
 
     sign_out = ft.Container(padding=ft.Padding.symmetric(horizontal=14, vertical=10), ink=True, on_click=lambda e: (page.session.store.clear(), page.go("/")), content=ft.Row(spacing=12, controls=[ft.Icon(ft.Icons.LOGOUT, size=20, color=colors["SIDEBAR_TEXT"]), ft.Text("Sign Out", size=14, color=colors["SIDEBAR_TEXT"]) ]))
 
@@ -294,7 +333,7 @@ def waste_new_view(page: ft.Page) -> ft.View:
     username = page.session.store.get("username") or "User"
     initials = username[:2].upper()
     user_avatar = ft.Container(width=38, height=38, bgcolor=colors["AVATAR_BG"], border_radius=19, alignment=ft.Alignment(0, 0), content=ft.Text(initials, size=14, weight=ft.FontWeight.W_600, color=colors["ORANGE"]))
-    top_bar = ft.Container(padding=ft.Padding.symmetric(horizontal=32, vertical=14), border=ft.Border(bottom=ft.BorderSide(1, colors["BORDER"])), bgcolor=colors["CARD_BG"], content=ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[ft.Text(""), ft.Row(spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[ft.Icon(ft.Icons.NOTIFICATIONS_NONE, size=22, color=colors["MUTED"]), ft.Column(spacing=0, horizontal_alignment=ft.CrossAxisAlignment.END, controls=[ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]), ft.Text(get_role_label(role), size=12, color=colors["MUTED"]) ]), user_avatar ]) ]))
+    top_bar = ft.Container(padding=ft.Padding.symmetric(horizontal=32, vertical=14), border=ft.Border(bottom=ft.BorderSide(1, colors["BORDER"])), bgcolor=colors["CARD_BG"], content=ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[ft.Text(""), ft.Container(ink=True, on_click=lambda e: page.go("/account"), border_radius=10, padding=ft.Padding.symmetric(horizontal=4, vertical=4), content=ft.Row(spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[ft.Column(spacing=0, horizontal_alignment=ft.CrossAxisAlignment.END, controls=[ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]), ft.Text(get_role_label(role), size=12, color=colors["MUTED"]) ]), user_avatar ])) ]))
 
     # Content header
     content_header = ft.Container(padding=ft.Padding.only(left=32, right=32, top=24, bottom=8), content=ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[ft.Column(spacing=4, controls=[ft.Text("Record Food Waste", size=26, weight=ft.FontWeight.W_700, color=colors["TEXT"]), ft.Text("Stock Management > Record Food Waste", size=12, color=colors["MUTED"]) ]), ft.Container() ]))
@@ -325,3 +364,4 @@ def waste_new_view(page: ft.Page) -> ft.View:
     layout = ft.Row(expand=True, spacing=0, controls=[sidebar, content_area])
 
     return ft.View(route="/waste/new", padding=0, spacing=0, bgcolor=colors["BG"], controls=[layout])
+

@@ -88,6 +88,20 @@ def _init_auth_db():
             )
     except Exception:
         pass
+
+    # Seed sample users for preview (all passwords = 1234)
+    sample_users = [
+        ("chef1", "chef1@kitchen.local", "1234", "chef"),
+        ("inventory1", "inventory1@kitchen.local", "1234", "inventory_staff"),
+        ("manager2", "manager2@kitchen.local", "1234", "manager"),
+    ]
+    for uname, uemail, upwd, urole in sample_users:
+        try:
+            cur.execute("SELECT id FROM users WHERE username=? LIMIT 1", (uname,))
+            if cur.fetchone() is None:
+                cur.execute("INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, ?)", (uname, uemail, upwd, urole, 1))
+        except Exception:
+            pass
     
     conn.commit()
     conn.close()
@@ -205,17 +219,7 @@ def login_view(page: ft.Page) -> ft.View:
         weight=ft.FontWeight.W_500,
     )
 
-    forgot_button = ft.TextButton(
-        "Forgot password?",
-        style=ft.ButtonStyle(
-            color=colors["ORANGE"],
-            padding=ft.Padding.symmetric(horizontal=0, vertical=0),
-            text_style=ft.TextStyle(
-                size=13,
-                weight=ft.FontWeight.W_600,
-            ),
-        ),
-    )
+    # Forgot password button removed (non-functional)
 
     password_input = ft.TextField(
         width=452,
@@ -231,14 +235,6 @@ def login_view(page: ft.Page) -> ft.View:
         text_size=14,
         color=colors["TEXT"],
         bgcolor=colors["CARD_BG"],
-    )
-
-    keep_logged_checkbox = ft.Checkbox(
-        label="Keep me logged in",
-        value=False,
-        active_color=colors["ORANGE"],
-        check_color="#FFFFFF",
-        label_style=ft.TextStyle(color=colors["TEXT"]),
     )
 
     sign_in_text = ft.Text(
@@ -365,7 +361,6 @@ def login_view(page: ft.Page) -> ft.View:
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         controls=[
             password_text,
-            forgot_button,
         ],
     )
 
@@ -393,7 +388,6 @@ def login_view(page: ft.Page) -> ft.View:
                         password_input,
                     ],
                 ),
-                keep_logged_checkbox,
                 error_text,
                 sign_in_button,
                 divider,
@@ -539,23 +533,13 @@ def login_view(page: ft.Page) -> ft.View:
         email_field["field"].bgcolor = colors["CARD_BG"]
 
         password_text.color = colors["TEXT"]
-        forgot_button.style = ft.ButtonStyle(
-            color=colors["ORANGE"],
-            padding=ft.Padding.symmetric(horizontal=0, vertical=0),
-            text_style=ft.TextStyle(
-                size=13,
-                weight=ft.FontWeight.W_600,
-            ),
-        )
+        # forgot_button removed; no style to update
 
         password_input.border_color = colors["BORDER"]
         password_input.focused_border_color = colors["ORANGE"]
         password_input.cursor_color = colors["ORANGE"]
         password_input.color = colors["TEXT"]
         password_input.bgcolor = colors["CARD_BG"]
-
-        keep_logged_checkbox.active_color = colors["ORANGE"]
-        keep_logged_checkbox.label_style = ft.TextStyle(color=colors["TEXT"])
 
         login_card.bgcolor = colors["CARD_BG"]
         login_card.border = ft.Border.all(1, colors["BORDER"])

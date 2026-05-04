@@ -229,7 +229,7 @@ def categories_view(page: ft.Page) -> ft.View:
         nav_items_data.extend([
             (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
-            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users", page.route == "/users", "/users"),
         ])
     # Settings removed (not implemented)
 
@@ -259,6 +259,30 @@ def categories_view(page: ft.Page) -> ft.View:
 
     username = page.session.store.get("username") or "User"
     initials = username[:2].upper()
+
+    topbar_search = ft.TextField(
+        hint_text="Search categories...",
+        width=400,
+        height=42,
+        border_radius=10,
+        border_color=colors["SEARCH_BORDER"],
+        focused_border_color=colors["ORANGE"],
+        bgcolor=colors["SEARCH_BG"],
+        prefix_icon=ft.Icons.SEARCH,
+        content_padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+        text_size=14,
+        color=colors["TEXT"],
+        cursor_color=colors["ORANGE"],
+    )
+
+    def on_topbar_search_submit(e):
+        val = (topbar_search.value or "").strip()
+        if val:
+            page.session.store.set("global_search", val)
+            page.go("/inventory")
+
+    topbar_search.on_submit = on_topbar_search_submit
+
     top_bar = ft.Container(
         padding=ft.Padding.symmetric(horizontal=32, vertical=14),
         border=ft.Border(bottom=ft.BorderSide(1, colors["BORDER"])),
@@ -267,28 +291,20 @@ def categories_view(page: ft.Page) -> ft.View:
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
-                ft.TextField(
-                    hint_text="Search categories...",
-                    width=400,
-                    height=42,
+                topbar_search,
+                ft.Container(
+                    ink=True,
+                    on_click=lambda e: page.go("/account"),
                     border_radius=10,
-                    border_color=colors["SEARCH_BORDER"],
-                    focused_border_color=colors["ORANGE"],
-                    bgcolor=colors["SEARCH_BG"],
-                    prefix_icon=ft.Icons.SEARCH,
-                    content_padding=ft.Padding.symmetric(horizontal=14, vertical=8),
-                    text_size=14,
-                    color=colors["TEXT"],
-                    cursor_color=colors["ORANGE"],
-                ),
-                ft.Row(
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Icon(ft.Icons.NOTIFICATIONS_NONE, size=22, color=colors["MUTED"]),
-                        ft.Column(spacing=0, horizontal_alignment=ft.CrossAxisAlignment.END, controls=[ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]), ft.Text(page.session.store.get("role") or "Kitchen Staff", size=12, color=colors["MUTED"])]),
-                        ft.Container(width=38, height=38, bgcolor=colors["AVATAR_BG"], border_radius=19, alignment=ft.Alignment(0, 0), content=ft.Text(initials, size=14, weight=ft.FontWeight.W_600, color=colors["ORANGE"])),
-                    ],
+                    padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                    content=ft.Row(
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Column(spacing=0, horizontal_alignment=ft.CrossAxisAlignment.END, controls=[ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]), ft.Text(page.session.store.get("role") or "Kitchen Staff", size=12, color=colors["MUTED"])]),
+                            ft.Container(width=38, height=38, bgcolor=colors["AVATAR_BG"], border_radius=19, alignment=ft.Alignment(0, 0), content=ft.Text(initials, size=14, weight=ft.FontWeight.W_600, color=colors["ORANGE"])),
+                        ],
+                    ),
                 ),
             ],
         ),
@@ -540,23 +556,6 @@ def categories_view(page: ft.Page) -> ft.View:
         shape=ft.RoundedRectangleBorder(radius=12),
     )
 
-    add_tip = ft.Container(
-        margin=ft.Margin(32, 16, 32, 16),
-        bgcolor=colors["CARD_BG"],
-        border=ft.Border.all(1, colors["BORDER"]),
-        border_radius=12,
-        shadow=card_shadow(),
-        padding=ft.Padding.all(20),
-        content=ft.Column(
-            spacing=10,
-            controls=[
-                ft.Row(spacing=8, controls=[ft.Icon(ft.Icons.TIPS_AND_UPDATES_OUTLINED, size=16, color=colors["MUTED"]), ft.Text("Management Tip", size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"])]),
-                ft.Divider(height=1, color=colors["DIVIDER"]),
-                ft.Text("Shelf life defaults help the app suggest safer expiry dates and keep teams aligned on how long stock should last.", size=13, color=colors["TEXT_SECONDARY"]),
-            ],
-        ),
-    )
-
     metrics_row = ft.Container(padding=ft.Padding.symmetric(horizontal=32, vertical=10), content=ft.Row(spacing=16, controls=[metric_card(ft.Icons.CATEGORY_OUTLINED, "Total Categories", metrics_total, "Total category records"), metric_card(ft.Icons.INVENTORY_2_OUTLINED, "Tracked Items", metrics_tracked, "Rows currently in inventory"), metric_card(ft.Icons.TIMER_OUTLINED, "Avg Shelf Life", metrics_avg, "Average shelf life across categories")]))
 
     controls_row = ft.Container(
@@ -575,7 +574,16 @@ def categories_view(page: ft.Page) -> ft.View:
 
     footer = ft.Container(padding=ft.Padding.symmetric(horizontal=32, vertical=14), border=ft.Border(top=ft.BorderSide(1, colors["DIVIDER"])), content=ft.Text("© 2026 Kitchen Food Waste Tracker. All rights reserved.", size=12, color=colors["MUTED"]))
 
-    content_area = ft.Container(expand=True, bgcolor=colors["BG"], content=ft.Column(expand=True, spacing=0, controls=[top_bar, title_block, controls_row, metrics_row, table_card, add_tip, ft.Container(expand=True), footer]))
+    content_area = ft.Container(
+        expand=True,
+        bgcolor=colors["BG"],
+        content=ft.Column(
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
+            spacing=0,
+            controls=[top_bar, title_block, controls_row, metrics_row, table_card, footer],
+        ),
+    )
 
     layout = ft.Row(expand=True, spacing=0, controls=[sidebar, content_area])
 
