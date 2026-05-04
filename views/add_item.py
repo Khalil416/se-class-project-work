@@ -83,6 +83,21 @@ CAT_REVERSE = {v: k for k, v in CAT_MAP.items()}
 STORAGE_MAP = {s: s for s in STORAGES}
 
 
+def _get_categories_from_db():
+    """Fetch category list from categories table in DB, fallback to CATEGORIES if empty."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT category_name FROM categories ORDER BY category_name ASC")
+        rows = cur.fetchall()
+        conn.close()
+        if rows:
+            return [r[0] for r in rows]
+    except Exception:
+        pass
+    return CATEGORIES
+
+
 def _ensure_columns():
     """Add new columns if they don't exist yet (migration-safe)."""
     conn = sqlite3.connect(DB_PATH)
@@ -214,22 +229,32 @@ def add_item_view(page: ft.Page) -> ft.View:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         ft.Icon(ft.Icons.NOTIFICATIONS_NONE, size=22, color=colors["MUTED"]),
-                        ft.Column(
-                            spacing=0,
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            controls=[
-                                ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
-                                ft.Text(get_role_label(role), size=12, color=colors["MUTED"]),
-                            ],
+                        ft.Container(
+                            ink=True,
+                            on_click=lambda e: page.go("/account"),
+                            border_radius=10,
+                            padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                            content=ft.Row(
+                                spacing=12,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    ft.Column(
+                                        spacing=0,
+                                        horizontal_alignment=ft.CrossAxisAlignment.END,
+                                        controls=[
+                                            ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                                            ft.Text(role, size=12, color=colors["MUTED"]),
+                                        ],
+                                    ),
+                                    user_avatar,
+                                ],
+                            ),
                         ),
-                        user_avatar,
                     ],
                 ),
             ],
         ),
     )
-
-    # ───────────────────── BACK LINK + HEADER ─────────────────────
 
     def go_back(e):
         if editing and page.session.store.contains_key("edit_item_id"):
@@ -316,7 +341,7 @@ def add_item_view(page: ft.Page) -> ft.View:
         border_radius=8, border_color=colors["BORDER"],
         focused_border_color=colors["ORANGE"],
         text_size=14, color=colors["TEXT"], bgcolor=colors["CARD_BG"],
-        options=[ft.DropdownOption(key=c, text=c) for c in CATEGORIES],
+        options=[ft.DropdownOption(key=c, text=c) for c in _get_categories_from_db()],
     )
 
     storage_val = prefill.get("storage", STORAGES[0])
@@ -481,24 +506,6 @@ def add_item_view(page: ft.Page) -> ft.View:
         ),
     )
 
-    pro_tip = ft.Container(
-        expand=True,
-        bgcolor=colors["ORANGE_BG"],
-        border_radius=10,
-        padding=ft.Padding.all(16),
-        content=ft.Column(
-            spacing=4, alignment=ft.MainAxisAlignment.CENTER,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Text("Pro Tip", size=13, weight=ft.FontWeight.W_700, color=colors["ORANGE"]),
-                ft.Text(
-                    "Most dairy items in this category\nexpire within 7 days.",
-                    size=12, color=colors["MUTED"], text_align=ft.TextAlign.CENTER,
-                ),
-            ],
-        ),
-    )
-
     expiry_card = ft.Container(
         bgcolor=colors["CARD_BG"],
         border=ft.Border.all(1, colors["BORDER"]),
@@ -530,20 +537,12 @@ def add_item_view(page: ft.Page) -> ft.View:
                         ),
                     ],
                 ),
-                ft.Row(
-                    spacing=16,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                    controls=[
-                        ft.Container(
-                            expand=True,
-                            content=ft.Column(spacing=8, controls=[
-                                field_label("Alert Threshold (Days)"),
-                                f_threshold,
-                                helper_text("Days before expiry to receive a notification."),
-                            ]),
-                        ),
-                        pro_tip,
-                    ],
+                ft.Container(
+                    content=ft.Column(spacing=8, controls=[
+                        field_label("Alert Threshold (Days)"),
+                        f_threshold,
+                        helper_text("Days before expiry to receive a notification."),
+                    ]),
                 ),
             ],
         ),

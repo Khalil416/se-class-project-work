@@ -84,7 +84,8 @@ def _period_range(period):
     if period == "weekly":
         start = today - timedelta(days=27)
     elif period == "monthly":
-        start = today - timedelta(days=182)
+        # show last 12 months for monthly view
+        start = today - timedelta(days=365)
     else:
         start = today - timedelta(days=6)
     return start, today
@@ -122,12 +123,60 @@ def _fetch_rows(period, search_text=""):
 
 
 def _aggregate_by_day(rows, start_date, end_date):
-    labels = []
-    values = []
-    current = start_date
+    # If the range is long (several months), aggregate by month and show month-only labels.
+    span_days = (end_date - start_date).days
     by_day = {}
     for row in rows:
         by_day[row["waste_date"]] = by_day.get(row["waste_date"], 0.0) + float(row.get("cost_estimate") or 0)
+    labels = []
+    values = []
+    # If range is large, aggregate appropriately for readability
+    if span_days > 90:
+        # Aggregate by month
+        by_month = {}
+        for k, v in by_day.items():
+            try:
+                dt = datetime.strptime(k[:10], "%Y-%m-%d").date()
+                mkey = dt.strftime("%Y-%m")
+                by_month[mkey] = by_month.get(mkey, 0.0) + v
+            except Exception:
+                continue
+
+        current = date(start_date.year, start_date.month, 1)
+        while current <= end_date:
+            mkey = current.strftime("%Y-%m")
+            labels.append(current.strftime("%b"))
+            values.append(by_month.get(mkey, 0.0))
+            # advance to next month
+            if current.month == 12:
+                current = date(current.year + 1, 1, 1)
+            else:
+                current = date(current.year, current.month + 1, 1)
+        return labels, values
+
+    if span_days > 21:
+        # Aggregate by week (start date of ISO week)
+        by_week = {}
+        for k, v in by_day.items():
+            try:
+                dt = datetime.strptime(k[:10], "%Y-%m-%d").date()
+                # week start (Monday)
+                week_start = dt - timedelta(days=dt.weekday())
+                wkey = week_start.strftime("%Y-%m-%d")
+                by_week[wkey] = by_week.get(wkey, 0.0) + v
+            except Exception:
+                continue
+
+        # iterate weeks
+        current = start_date - timedelta(days=start_date.weekday())
+        while current <= end_date:
+            labels.append(current.strftime("%b %d"))
+            values.append(by_week.get(current.strftime("%Y-%m-%d"), 0.0))
+            current += timedelta(days=7)
+        return labels, values
+
+    # default: per-day labels
+    current = start_date
     while current <= end_date:
         key = current.strftime("%Y-%m-%d")
         labels.append(current.strftime("%b %d"))
@@ -203,9 +252,9 @@ def reports_view(page: ft.Page) -> ft.View:
         nav_items_data.extend([
             (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
-            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users", page.route == "/users", "/users"),
         ])
-    nav_items_data.append((ft.Icons.SETTINGS_OUTLINED, "Settings", False, None))
+    # Settings removed (not implemented)
 
     nav_column = ft.Column(spacing=2, controls=[build_nav_item(i, l, a, r) for i, l, a, r in nav_items_data])
 
@@ -245,6 +294,29 @@ def reports_view(page: ft.Page) -> ft.View:
     username = page.session.store.get("username") or "User"
     initials = username[:2].upper()
 
+    topbar_search = ft.TextField(
+        hint_text="Search analytics...",
+        width=400,
+        height=42,
+        border_radius=10,
+        border_color=colors["SEARCH_BORDER"],
+        focused_border_color=colors["ORANGE"],
+        bgcolor=colors["SEARCH_BG"],
+        prefix_icon=ft.Icons.SEARCH,
+        content_padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+        text_size=14,
+        color=colors["TEXT"],
+        cursor_color=colors["ORANGE"],
+    )
+
+    def on_topbar_search_submit(e):
+        val = (topbar_search.value or "").strip()
+        if val:
+            page.session.store.set("global_search", val)
+            page.go("/inventory")
+
+    topbar_search.on_submit = on_topbar_search_submit
+
     top_bar = ft.Container(
         padding=ft.Padding.symmetric(horizontal=32, vertical=14),
         border=ft.Border(bottom=ft.BorderSide(1, colors["BORDER"])),
@@ -253,35 +325,27 @@ def reports_view(page: ft.Page) -> ft.View:
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
-                ft.TextField(
-                    hint_text="Search analytics...",
-                    width=400,
-                    height=42,
+                topbar_search,
+                ft.Container(
+                    ink=True,
+                    on_click=lambda e: page.go("/account"),
                     border_radius=10,
-                    border_color=colors["SEARCH_BORDER"],
-                    focused_border_color=colors["ORANGE"],
-                    bgcolor=colors["SEARCH_BG"],
-                    prefix_icon=ft.Icons.SEARCH,
-                    content_padding=ft.Padding.symmetric(horizontal=14, vertical=8),
-                    text_size=14,
-                    color=colors["TEXT"],
-                    cursor_color=colors["ORANGE"],
-                ),
-                ft.Row(
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Icon(ft.Icons.NOTIFICATIONS_NONE, size=22, color=colors["MUTED"]),
-                        ft.Column(
-                            spacing=0,
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            controls=[
-                                ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
-                                ft.Text(page.session.store.get("role") or "Kitchen Staff", size=12, color=colors["MUTED"]),
-                            ],
-                        ),
-                        ft.Container(width=38, height=38, bgcolor=colors["AVATAR_BG"], border_radius=19, alignment=ft.Alignment(0, 0), content=ft.Text(initials, size=14, weight=ft.FontWeight.W_600, color=colors["ORANGE"])),
-                    ],
+                    padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                    content=ft.Row(
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Column(
+                                spacing=0,
+                                horizontal_alignment=ft.CrossAxisAlignment.END,
+                                controls=[
+                                    ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                                    ft.Text(page.session.store.get("role") or "Kitchen Staff", size=12, color=colors["MUTED"]),
+                                ],
+                            ),
+                            ft.Container(width=38, height=38, bgcolor=colors["AVATAR_BG"], border_radius=19, alignment=ft.Alignment(0, 0), content=ft.Text(initials, size=14, weight=ft.FontWeight.W_600, color=colors["ORANGE"])),
+                        ],
+                    ),
                 ),
             ],
         ),
@@ -348,54 +412,63 @@ def reports_view(page: ft.Page) -> ft.View:
         fg, bg = mapping.get((reason or "other").lower(), (colors["MUTED"], colors["DIVIDER"]))
         return status_badge(reason_label(reason), bg, fg)
 
-    def pill_button(label, period):
-        active = selected_period[0] == period
-        return ft.Container(
-            padding=ft.Padding.symmetric(horizontal=14, vertical=10),
-            border_radius=8,
-            bgcolor=colors["ORANGE"] if active else colors["CARD_BG"],
-            border=ft.Border.all(1, colors["ORANGE"] if active else colors["BORDER"]),
-            ink=True,
-            on_click=lambda e, p=period: set_period(p),
-            content=ft.Text(label, size=13, color="#FFFFFF" if active else colors["TEXT"], weight=ft.FontWeight.W_600 if active else ft.FontWeight.W_400),
-        )
-
     def download_csv(e):
-        return None
+        import csv, os
+        rows, _start, _end = _fetch_rows(selected_period[0])
+        if not rows:
+            page.snack_bar = ft.SnackBar(
+                ft.Text("No waste data to export for this period.", color="#FFFFFF"),
+                bgcolor=colors["ORANGE"],
+            )
+            page.snack_bar.open = True
+            page.update()
+            return
+        filename = f"waste_report_{date.today().strftime('%Y-%m-%d')}.csv"
+        # Save into a local reports/ folder inside project root
+        try:
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            reports_dir = os.path.join(project_root, "reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            filepath = os.path.join(reports_dir, filename)
+            with open(filepath, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Date", "Item Name", "Category", "Quantity", "Unit", "Reason", "Cost Estimate"])
+                for row in rows:
+                    writer.writerow([
+                        row.get("waste_date", ""),
+                        row.get("item_name", "Unknown"),
+                        row.get("category", ""),
+                        row.get("qty_wasted", ""),
+                        row.get("unit", ""),
+                        row.get("reason", ""),
+                        row.get("cost_estimate", ""),
+                    ])
+            # show modal dialog confirming file saved
+            def ok(e):
+                page.pop_dialog()
 
-    selected_period_row = ft.Row(
-        spacing=8,
-        controls=[
-            pill_button("Daily", "daily"),
-            pill_button("Weekly", "weekly"),
-            pill_button("Monthly", "monthly"),
-        ],
-    )
+            dlg = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Export Complete", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                content=ft.Column(spacing=8, controls=[ft.Text(f"Report saved to: reports/{filename}", size=13, color=colors["TEXT_SECONDARY"])]),
+                actions=[ft.Button("OK", on_click=ok, style=ft.ButtonStyle(bgcolor=colors["ORANGE"], color="#FFFFFF"))],
+                bgcolor=colors["CARD_BG"],
+            )
+            page.show_dialog(dlg)
+        except Exception as ex:
+            def err_ok(e):
+                page.pop_dialog()
 
-    csv_button = ft.Button(
-        "Download CSV",
-        icon=ft.Icons.DOWNLOAD,
-        on_click=download_csv,
-        style=ft.ButtonStyle(
-            bgcolor=colors["ORANGE"],
-            color="#FFFFFF",
-            elevation=0,
-            shape=ft.RoundedRectangleBorder(radius=8),
-            padding=ft.Padding.symmetric(horizontal=18, vertical=12),
-        ),
-    )
-
-    top_controls = ft.Container(
-        padding=ft.Padding.symmetric(horizontal=32, vertical=8),
-        content=ft.Row(
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[selected_period_row, csv_button],
-        ),
-    )
+            dlg = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Export Failed", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                content=ft.Column(spacing=8, controls=[ft.Text(f"Export failed: {ex}", size=13, color=colors["TEXT_SECONDARY"])]),
+                actions=[ft.Button("OK", on_click=err_ok, style=ft.ButtonStyle(bgcolor=colors["RED"], color="#FFFFFF"))],
+                bgcolor=colors["CARD_BG"],
+            )
+            page.show_dialog(dlg)
 
     metric_value_total = ft.Text("$0.00", size=28, weight=ft.FontWeight.W_700, color=colors["TEXT"])
-    metric_value_weight = ft.Text("0.0 kg", size=28, weight=ft.FontWeight.W_700, color=colors["TEXT"])
     metric_value_eff = ft.Text("100.0%", size=28, weight=ft.FontWeight.W_700, color=colors["TEXT"])
 
     def metric_card(icon, title, value_control, helper_text):
@@ -415,18 +488,6 @@ def reports_view(page: ft.Page) -> ft.View:
                 ],
             ),
         )
-
-    metrics_row = ft.Container(
-        padding=ft.Padding.symmetric(horizontal=32, vertical=10),
-        content=ft.Row(
-            spacing=16,
-            controls=[
-                metric_card(ft.Icons.ATTACH_MONEY, "Total Financial Loss", metric_value_total, "Sum of cost estimate from waste logs"),
-                metric_card(ft.Icons.STORAGE_OUTLINED, "Wasted Weight", metric_value_weight, "Sum of quantity wasted this period"),
-                metric_card(ft.Icons.PERCENT, "Kitchen Efficiency %", metric_value_eff, "100 - avoidable waste percentage"),
-            ],
-        ),
-    )
 
     trend_title = ft.Text("Waste Cost Trend", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"])
     reason_title = ft.Text("Waste by Reason", size=16, weight=ft.FontWeight.W_600, color=colors["TEXT"])
@@ -469,12 +530,10 @@ def reports_view(page: ft.Page) -> ft.View:
 
     def rebuild_charts(rows, start_date, end_date):
         total_loss = sum(float(row.get("cost_estimate") or 0) for row in rows)
-        total_weight = sum(float(row.get("qty_wasted") or 0) for row in rows)
         avoidable_loss = sum(float(row.get("cost_estimate") or 0) for row in rows if (row.get("reason") or "").lower() in {"prep_waste", "overproduction"})
         efficiency = max(0.0, 100.0 - ((avoidable_loss / total_loss) * 100.0 if total_loss else 0.0))
 
         metric_value_total.value = format_money(total_loss)
-        metric_value_weight.value = f"{total_weight:.1f} kg"
         metric_value_eff.value = f"{efficiency:.1f}%"
 
         labels, values = _aggregate_by_day(rows, start_date, end_date)
@@ -489,13 +548,13 @@ def reports_view(page: ft.Page) -> ft.View:
             min_y=0,
             max_y=max_y * 1.2,
             height=220,
-            expand=True,
+            expand=False,
             bgcolor="transparent",
             horizontal_grid_lines=fch.ChartGridLines(interval=max_y / 4 if max_y else 1, color=colors["CHART_GRID"], width=1),
             left_axis=fch.ChartAxis(show_labels=False, label_size=0),
             right_axis=fch.ChartAxis(show_labels=False, label_size=0),
             top_axis=fch.ChartAxis(show_labels=False, label_size=0),
-            bottom_axis=fch.ChartAxis(labels=[fch.ChartAxisLabel(value=i, label=ft.Text(label, size=11, color=colors["MUTED"])) for i, label in enumerate(labels)], label_size=28),
+            bottom_axis=fch.ChartAxis(labels=[fch.ChartAxisLabel(value=i, label=ft.Text(label, size=11, color=colors["MUTED"])) for i, label in enumerate(labels)], label_size=12),
             tooltip=fch.LineChartTooltip(bgcolor=colors["CARD_BG"]),
         )
         trend_chart_host.content = trend_chart
@@ -503,14 +562,16 @@ def reports_view(page: ft.Page) -> ft.View:
         reason_totals = _aggregate_reason_cost(rows)
         reason_chart_host.controls = []
         if reason_totals:
+            max_reason_cost = max(reason_totals.values()) if reason_totals else 1
             for reason, cost in sorted(reason_totals.items(), key=lambda item: item[1], reverse=True):
+                fill_w = max(12, int(300 * (cost / max_reason_cost)))
                 reason_chart_host.controls.append(
                     ft.Row(
                         spacing=12,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             ft.Text(reason_label(reason), size=12, color=colors["TEXT_SECONDARY"], width=110),
-                            ft.Container(expand=True, height=20, bgcolor=colors["DIVIDER"], border_radius=4, content=ft.Container(width=max(12, cost), bgcolor=reason_color(reason), border_radius=4)),
+                            ft.Container(width=fill_w, height=20, bgcolor=reason_color(reason), border_radius=4),
                             ft.Text(format_money(cost), size=12, color=colors["TEXT"], width=90, text_align=ft.TextAlign.RIGHT),
                         ],
                     )
@@ -521,14 +582,16 @@ def reports_view(page: ft.Page) -> ft.View:
         item_totals = _aggregate_item_cost(rows)
         top_items_host.controls = []
         if item_totals:
+            max_item_cost = max(item_totals.values()) if item_totals else 1
             for item_name, cost in item_totals.items():
+                fill_w = max(12, int(300 * (cost / max_item_cost)))
                 top_items_host.controls.append(
                     ft.Row(
                         spacing=12,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             ft.Text(item_name, size=12, color=colors["TEXT_SECONDARY"], width=140),
-                            ft.Container(expand=True, height=20, bgcolor=colors["DIVIDER"], border_radius=4, content=ft.Container(width=max(12, cost), bgcolor=colors["ORANGE"], border_radius=4)),
+                            ft.Container(width=fill_w, height=20, bgcolor=colors["ORANGE"], border_radius=4),
                             ft.Text(format_money(cost), size=12, color=colors["TEXT"], width=90, text_align=ft.TextAlign.RIGHT),
                         ],
                     )
@@ -592,7 +655,7 @@ def reports_view(page: ft.Page) -> ft.View:
                 ft.Button(
                     "Download CSV",
                     icon=ft.Icons.DOWNLOAD,
-                    on_click=lambda e: None,
+                    on_click=download_csv,
                     style=ft.ButtonStyle(bgcolor=colors["ORANGE"], color="#FFFFFF", elevation=0, shape=ft.RoundedRectangleBorder(radius=8), padding=ft.Padding.symmetric(horizontal=18, vertical=12)),
                 ),
             ],
@@ -607,7 +670,6 @@ def reports_view(page: ft.Page) -> ft.View:
             spacing=16,
             controls=[
                 metric_card(ft.Icons.ATTACH_MONEY, "Total Financial Loss", metric_value_total, "Sum of cost estimate from waste logs"),
-                metric_card(ft.Icons.STORAGE_OUTLINED, "Wasted Weight", metric_value_weight, "Sum of quantity wasted this period"),
                 metric_card(ft.Icons.PERCENT, "Kitchen Efficiency %", metric_value_eff, "100 - avoidable waste percentage"),
             ],
         ),
@@ -632,22 +694,17 @@ def reports_view(page: ft.Page) -> ft.View:
         ),
     )
 
-    insight_card = ft.Container(
-        margin=ft.Margin(32, 16, 32, 16),
-        bgcolor=colors["CARD_BG"],
-        border=ft.Border.all(1, colors["BORDER"]),
-        border_radius=12,
-        shadow=card_shadow(),
-        padding=ft.Padding.all(20),
-        content=ft.Column(spacing=10, controls=[ft.Row(spacing=8, controls=[ft.Icon(ft.Icons.INSIGHTS_OUTLINED, size=16, color=colors["MUTED"]), ft.Text("Manager Insight", size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"])]), ft.Divider(height=1, color=colors["DIVIDER"]), insight_text]),
-    )
-
     footer = ft.Container(padding=ft.Padding.symmetric(horizontal=32, vertical=14), border=ft.Border(top=ft.BorderSide(1, colors["DIVIDER"])), content=ft.Text("© 2026 Kitchen Food Waste Tracker. All rights reserved.", size=12, color=colors["MUTED"]))
 
     content_area = ft.Container(
         expand=True,
         bgcolor=colors["BG"],
-        content=ft.Column(expand=True, spacing=0, controls=[top_bar, title_block, controls_row, summary_cards, charts_row, items_row, insight_card, ft.Container(expand=True), footer]),
+        content=ft.Column(
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
+            spacing=0,
+            controls=[top_bar, title_block, controls_row, summary_cards, charts_row, items_row, footer],
+        ),
     )
 
     layout = ft.Row(expand=True, spacing=0, controls=[sidebar, content_area])

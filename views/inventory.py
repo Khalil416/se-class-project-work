@@ -232,9 +232,9 @@ def inventory_view(page: ft.Page) -> ft.View:
         nav_items_data.extend([
             (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
-            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users", page.route == "/users", "/users"),
         ])
-    nav_items_data.append((ft.Icons.SETTINGS_OUTLINED, "Settings", False, None))
+    # Settings removed (not implemented)
 
     def build_nav_item(icon, label, active=False, route=None):
         text_color = colors["ORANGE"] if active else colors["SIDEBAR_TEXT"]
@@ -352,28 +352,26 @@ def inventory_view(page: ft.Page) -> ft.View:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 top_search,
-                ft.Row(
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Icon(ft.Icons.NOTIFICATIONS_NONE, size=22, color=colors["MUTED"]),
-                        ft.Column(
-                            spacing=0,
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            controls=[
-                                ft.Text(
-                                    username, size=14,
-                                    weight=ft.FontWeight.W_600,
-                                    color=colors["TEXT"],
-                                ),
-                                ft.Text(
-                                    get_role_label(role), size=12,
-                                    color=colors["MUTED"],
-                                ),
-                            ],
-                        ),
-                        user_avatar,
-                    ],
+                ft.Container(
+                    ink=True,
+                    on_click=lambda e: page.go("/account"),
+                    border_radius=10,
+                    padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                    content=ft.Row(
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Column(
+                                spacing=0,
+                                horizontal_alignment=ft.CrossAxisAlignment.END,
+                                controls=[
+                                    ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                                    ft.Text(get_role_label(role), size=12, color=colors["MUTED"]),
+                                ],
+                            ),
+                            user_avatar,
+                        ],
+                    ),
                 ),
             ],
         ),
@@ -385,6 +383,11 @@ def inventory_view(page: ft.Page) -> ft.View:
         if page.session.store.contains_key("edit_item_id"):
             page.session.store.remove("edit_item_id")
         page.go("/add-item")
+
+    def open_waste_page(e):
+        if page.session.store.contains_key("waste_item_id"):
+            page.session.store.remove("waste_item_id")
+        page.go("/waste/new")
 
     content_header = ft.Container(
         padding=ft.Padding.only(left=32, right=32, top=24, bottom=8),
@@ -571,8 +574,9 @@ def inventory_view(page: ft.Page) -> ft.View:
         item_id, name, sku, category, qty, unit, storage, expiry, status_text = item
         status_label, status_color, status_bg = get_status_info(expiry)
 
-        # Format quantity
-        qty_display = f"{int(qty)}" if qty == int(qty) else f"{qty}"
+        # Format quantity defensively to hide floating-point artifacts.
+        qty_val = round(float(qty), 3)
+        qty_display = f"{qty_val:.3f}".rstrip("0").rstrip(".")
 
         # Item name cell with icon and SKU
         name_cell = ft.Container(
@@ -652,6 +656,10 @@ def inventory_view(page: ft.Page) -> ft.View:
             page.session.store.set("edit_item_id", iid)
             page.go("/add-item")
 
+        def on_record_waste(e, iid=item_id):
+            page.session.store.set("waste_item_id", iid)
+            page.go("/waste/new")
+
         def on_delete(e, iid=item_id, iname=name):
             show_delete_dialog(iid, iname)
 
@@ -665,6 +673,11 @@ def inventory_view(page: ft.Page) -> ft.View:
                 icon_size=18,
                 icon_color=colors["MUTED"],
                 items=[
+                    ft.PopupMenuItem(
+                        content=ft.Text("Record Waste"),
+                        icon=ft.Icons.DELETE_OUTLINE,
+                        on_click=on_record_waste,
+                    ),
                     ft.PopupMenuItem(
                         content=ft.Text("Edit"),
                         icon=ft.Icons.EDIT_OUTLINED,
@@ -951,6 +964,12 @@ def inventory_view(page: ft.Page) -> ft.View:
         page.show_dialog(dlg)
 
     # ───────────────────── LAYOUT ASSEMBLY ─────────────────────
+
+    # Pick up global search forwarded from dashboard
+    _gs = page.session.store.get("global_search")
+    if _gs:
+        filter_search.value = _gs
+        page.session.store.set("global_search", None)
 
     # Initial load
     refresh_table()

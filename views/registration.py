@@ -47,7 +47,10 @@ def _init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE,
             email TEXT NOT NULL UNIQUE,
-            password TEXT NOT NULL
+            password TEXT NOT NULL,
+            role TEXT DEFAULT 'chef',
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -55,14 +58,14 @@ def _init_db():
     conn.close()
 
 
-def _register_user(username: str, email: str, password: str) -> str | None:
+def _register_user(username: str, email: str, password: str, role: str = "chef") -> str | None:
     """Insert a new user. Returns an error message string on failure, None on success."""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
-            (username, email, password),
+            "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
+            (username, email, password, role),
         )
         conn.commit()
         return None
@@ -137,13 +140,45 @@ def registration_view(page: ft.Page) -> ft.View:
         text_align=ft.TextAlign.CENTER,
     )
 
+    # Fields
     username_field = labeled_field("Username", ft.Icons.PERSON_OUTLINE)
     email_field = labeled_field("Email", ft.Icons.MAIL_OUTLINE)
     password_field = labeled_field("Password", ft.Icons.LOCK_OUTLINE, password=True)
     confirm_password_field = labeled_field("Confirm Password", ft.Icons.LOCK_OUTLINE, password=True)
 
+    role_dropdown = ft.Dropdown(
+        label="Choose a role",
+        value="chef",
+        width=452,
+        options=[
+            ft.DropdownOption("chef", "Kitchen Staff"),
+            ft.DropdownOption("inventory_staff", "Inventory Manager"),
+            ft.DropdownOption("manager", "General Manager"),
+        ],
+    )
+
+    role_section = ft.Column(
+        spacing=8,
+        controls=[
+            ft.Text(
+                "User Role",
+                size=15,
+                color=colors["TEXT"],
+                weight=ft.FontWeight.W_500,
+            ),
+            role_dropdown,
+        ],
+    )
+
     error_text = ft.Text("", size=13, color="#DC2626", visible=False)
     success_text = ft.Text("", size=13, color="#16A34A", visible=False)
+
+    # If the current session user is not a manager, redirect away (registration is manager-only)
+    curr_role = page.session.store.get("role")
+    if curr_role != "manager":
+        # Non-managers should not access this page
+        page.go("/")
+        return ft.View(route="/register", padding=0, spacing=0, bgcolor=colors["BG"], controls=[])
 
     def on_register(e):
         error_text.visible = False
@@ -153,6 +188,7 @@ def registration_view(page: ft.Page) -> ft.View:
         email_val = (email_field["field"].value or "").strip()
         password = password_field["field"].value or ""
         confirm = confirm_password_field["field"].value or ""
+        role_val = (role_dropdown.value or "chef")
 
         if not username or not email_val or not password or not confirm:
             error_text.value = "All fields are required."
@@ -178,19 +214,16 @@ def registration_view(page: ft.Page) -> ft.View:
             page.update()
             return
 
-        err = _register_user(username, email_val, password)
+        err = _register_user(username, email_val, password, role_val)
         if err:
             error_text.value = err
             error_text.visible = True
-        else:
-            success_text.value = "Registration successful! You can now sign in."
-            success_text.visible = True
-            username_field["field"].value = ""
-            email_field["field"].value = ""
-            password_field["field"].value = ""
-            confirm_password_field["field"].value = ""
+            page.update()
+            return
 
-        page.update()
+        # On success, redirect back to users list for managers
+        page.go("/users")
+        return
 
     register_button = ft.Button(
         width=452,
@@ -212,9 +245,9 @@ def registration_view(page: ft.Page) -> ft.View:
         ),
     )
 
-    sign_in_link = ft.TextButton(
-        "Already have an account? Sign In",
-        on_click=lambda e: page.go("/"),
+    back_button = ft.TextButton(
+        "Back to Users",
+        on_click=lambda e: page.go("/users"),
         style=ft.ButtonStyle(
             color=colors["ORANGE"],
             text_style=ft.TextStyle(size=13, weight=ft.FontWeight.W_600),
@@ -242,13 +275,14 @@ def registration_view(page: ft.Page) -> ft.View:
                 email_field["view"],
                 password_field["view"],
                 confirm_password_field["view"],
+                role_section,
                 error_text,
                 success_text,
                 register_button,
                 ft.Divider(height=20, color=colors["DIVIDER"]),
                 ft.Row(
                     alignment=ft.MainAxisAlignment.CENTER,
-                    controls=[sign_in_link],
+                    controls=[back_button],
                 ),
             ],
         ),

@@ -10,6 +10,8 @@ from views.waste_logs import waste_logs_view
 from views.reports import reports_view
 from views.categories import categories_view
 from views.users_staff import users_staff_view
+from views.account import account_view
+from views.registration import registration_view
 
 def main(page: ft.Page):
     page.title = "Kitchen Waste Tracker"
@@ -31,7 +33,7 @@ def main(page: ft.Page):
         user_role = page.session.store.get("role") or "chef"
 
         # Login check for protected routes
-        protected_routes = ["/dashboard", "/inventory", "/add-item", "/waste/new", "/expiry", "/waste-logs", "/reports", "/categories", "/users"]
+        protected_routes = ["/dashboard", "/inventory", "/add-item", "/waste/new", "/expiry", "/waste-logs", "/reports", "/categories", "/users", "/account", "/register"]
         if any(page.route == r for r in protected_routes) and not is_logged_in:
             page.route = "/"
         
@@ -47,10 +49,6 @@ def main(page: ft.Page):
         if page.route in ("/expiry", "/waste-logs") and user_role not in ("manager", "inventory_staff"):
             page.route = "/dashboard"
         
-        # Chef + Manager routes
-        if page.route == "/waste/new" and user_role not in ("chef", "manager"):
-            page.route = "/dashboard"
-
         page.views.clear()
 
         # Always add the login view as root
@@ -94,6 +92,12 @@ def main(page: ft.Page):
 
         if page.route == "/users":
             page.views.append(users_staff_view(page))
+
+        if page.route == "/account":
+            page.views.append(account_view(page))
+
+        if page.route == "/register":
+            page.views.append(registration_view(page))
 
         page.update()
 

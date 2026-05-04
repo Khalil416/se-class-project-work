@@ -1,5 +1,7 @@
 import flet as ft
 import flet_charts as fch
+import sqlite3
+from datetime import datetime, timedelta, date
 
 
 LIGHT = {
@@ -69,7 +71,153 @@ def dashboard_view(page: ft.Page) -> ft.View:
             offset=ft.Offset(0, 2),
         )
 
+    # -------------------- DB helpers --------------------
+    DB_PATH = "inventory.db"
+
+    def _connect(db_path=DB_PATH):
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _safe_int(v):
+        try:
+            return int(v)
+        except Exception:
+            return 0
+
+    def get_total_items():
+        try:
+            conn = _connect()
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM inventory")
+            r = cur.fetchone()
+            conn.close()
+            return _safe_int(r[0]) if r else 0
+        except Exception:
+            return 0
+
+    def get_near_expiry(days=7):
+        try:
+            today = date.today()
+            end = today + timedelta(days=days)
+            conn = _connect()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM inventory WHERE DATE(expiry_date) BETWEEN DATE(?) AND DATE(?)",
+                (today.isoformat(), end.isoformat()),
+            )
+            r = cur.fetchone()
+            conn.close()
+            return _safe_int(r[0]) if r else 0
+        except Exception:
+            return 0
+
+    def get_expired_today():
+        try:
+            today = date.today().isoformat()
+            conn = _connect()
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM inventory WHERE DATE(expiry_date) < DATE(?)", (today,))
+            r = cur.fetchone()
+            conn.close()
+            return _safe_int(r[0]) if r else 0
+        except Exception:
+            return 0
+
+    def get_waste_sum_since(days=7):
+        try:
+            cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
+            conn = _connect()
+            cur = conn.cursor()
+            cur.execute("SELECT SUM(cost_estimate) FROM waste_logs WHERE DATE(waste_date) >= DATE(?)", (cutoff,))
+            r = cur.fetchone()
+            conn.close()
+            return float(r[0]) if r and r[0] is not None else 0.0
+        except Exception:
+            return 0.0
+
+    def get_waste_distribution(top_n=5):
+        try:
+            conn = _connect()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT COALESCE(i.category, 'Uncategorized') as category, SUM(w.cost_estimate) as total
+                FROM waste_logs w
+                LEFT JOIN inventory i ON w.item_id = i.id
+                GROUP BY category
+                ORDER BY total DESC
+                LIMIT ?
+                """,
+                (top_n,)
+            )
+            rows = cur.fetchall()
+            conn.close()
+            return [(r["category"], float(r["total"] or 0.0)) for r in rows]
+        except Exception:
+            return []
+
+    def get_daily_trend(days=7):
+        try:
+            conn = _connect()
+            cur = conn.cursor()
+            results = []
+            labels = []
+            for i in range(days - 1, -1, -1):
+                dt = date.today() - timedelta(days=i)
+                labels.append(dt.strftime("%a"))
+                cur.execute("SELECT SUM(cost_estimate) FROM waste_logs WHERE DATE(waste_date)=DATE(?)", (dt.isoformat(),))
+                r = cur.fetchone()
+                results.append(float(r[0]) if r and r[0] is not None else 0.0)
+            conn.close()
+            # points as (x, y) where x indexes labels
+            points = [(i, v) for i, v in enumerate(results)]
+            return points, labels
+        except Exception:
+            return [], []
+
+    def get_expiring_items(days=7, limit=5):
+        try:
+            today = date.today()
+            end = today + timedelta(days=days)
+            conn = _connect()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, item_name, category, expiry_date FROM inventory WHERE DATE(expiry_date) BETWEEN DATE(?) AND DATE(?) ORDER BY DATE(expiry_date) ASC LIMIT ?",
+                (today.isoformat(), end.isoformat(), limit),
+            )
+            rows = cur.fetchall()
+            conn.close()
+            return rows
+        except Exception:
+            return []
+
+    def get_recent_waste_logs(limit=5):
+        try:
+            conn = _connect()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT w.qty_wasted, w.unit, w.reason, w.cost_estimate, w.waste_date, i.item_name
+                FROM waste_logs w
+                LEFT JOIN inventory i ON w.item_id = i.id
+                ORDER BY DATE(w.waste_date) DESC, w.rowid DESC
+                LIMIT ?
+                """,
+                (limit,)
+            )
+            rows = cur.fetchall()
+            conn.close()
+            return rows
+        except Exception:
+            return []
+
     # ───────────────────── SIDEBAR ─────────────────────
+
+    def _get_role_label(r):
+        return {"chef": "Kitchen Staff", "inventory_staff": "Inventory Manager", "manager": "General Manager"}.get(r, "Kitchen Staff")
+
+    today_date = date.today()
 
     logo_icon = ft.Image(
         src="assets/logo.png",
@@ -100,7 +248,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
         nav_items_data.extend([
             (ft.Icons.BAR_CHART, "Reports", page.route == "/reports", "/reports"),
             (ft.Icons.CATEGORY_OUTLINED, "Categories", page.route == "/categories", "/categories"),
-            (ft.Icons.PEOPLE_OUTLINE, "Users & Staff", page.route == "/users", "/users"),
+            (ft.Icons.PEOPLE_OUTLINE, "Users", page.route == "/users", "/users"),
         ])
 
     def build_nav_item(icon, label, active=False, route=None):
@@ -111,15 +259,10 @@ def dashboard_view(page: ft.Page) -> ft.View:
 
         row_controls = [
             ft.Icon(icon, size=20, color=icon_color),
-            ft.Text(
-                label, size=14, color=text_color,
-                weight=weight, expand=True,
-            ),
+            ft.Text(label, size=14, color=text_color, weight=weight, expand=True),
         ]
         if active:
-            row_controls.append(
-                ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color=icon_color)
-            )
+            row_controls.append(ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color=icon_color))
 
         def nav_click(e, r=route):
             if r:
@@ -134,10 +277,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
             on_click=nav_click if route and not active else None,
         )
 
-    nav_column = ft.Column(
-        spacing=2,
-        controls=[build_nav_item(i, l, a, r) for i, l, a, r in nav_items_data],
-    )
+    nav_column = ft.Column(spacing=2, controls=[build_nav_item(i, l, a, r) for i, l, a, r in nav_items_data])
 
     def on_sign_out(e):
         page.session.store.clear()
@@ -194,6 +334,14 @@ def dashboard_view(page: ft.Page) -> ft.View:
         cursor_color=colors["ORANGE"],
     )
 
+    def on_search_submit(e):
+        val = (search_field.value or "").strip()
+        if val:
+            page.session.store.set("global_search", val)
+            page.go("/inventory")
+
+    search_field.on_submit = on_search_submit
+
     username = page.session.store.get("username") or "User"
     initials = username[:2].upper()
 
@@ -219,27 +367,26 @@ def dashboard_view(page: ft.Page) -> ft.View:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 search_field,
-                ft.Row(
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Column(
-                            spacing=0,
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            controls=[
-                                ft.Text(
-                                    username, size=14,
-                                    weight=ft.FontWeight.W_600,
-                                    color=colors["TEXT"],
-                                ),
-                                ft.Text(
-                                    "Head Manager", size=12,
-                                    color=colors["MUTED"],
-                                ),
-                            ],
-                        ),
-                        user_avatar,
-                    ],
+                ft.Container(
+                    ink=True,
+                    on_click=lambda e: page.go("/account"),
+                    border_radius=10,
+                    padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                    content=ft.Row(
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Column(
+                                spacing=0,
+                                horizontal_alignment=ft.CrossAxisAlignment.END,
+                                controls=[
+                                    ft.Text(username, size=14, weight=ft.FontWeight.W_600, color=colors["TEXT"]),
+                                    ft.Text(_get_role_label(role), size=12, color=colors["MUTED"]),
+                                ],
+                            ),
+                            user_avatar,
+                        ],
+                    ),
                 ),
             ],
         ),
@@ -270,28 +417,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                 ft.Row(
                     spacing=14,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Container(
-                            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
-                            border=ft.Border.all(1, colors["BORDER"]),
-                            border_radius=8,
-                            bgcolor=colors["CARD_BG"],
-                            content=ft.Row(
-                                spacing=8,
-                                controls=[
-                                    ft.Icon(
-                                        ft.Icons.CALENDAR_TODAY_OUTLINED,
-                                        size=16, color=colors["MUTED"],
-                                    ),
-                                    ft.Text(
-                                        "Oct 18 - Oct 25", size=13,
-                                        color=colors["TEXT"],
-                                        weight=ft.FontWeight.W_500,
-                                    ),
-                                ],
-                            ),
-                        ),
-                    ] + ([
+                    controls=([ ] + [
                         ft.Button(
                             "Record Waste",
                             icon=ft.Icons.ADD,
@@ -363,6 +489,30 @@ def dashboard_view(page: ft.Page) -> ft.View:
             ),
         )
 
+    # Fetch dynamic stats from DB
+    total_items = get_total_items()
+    near_expiry_count = get_near_expiry(7)
+    expired_today_count = get_expired_today()
+    waste_week = get_waste_sum_since(7)
+    # compute previous week for simple percent delta
+    waste_2weeks = get_waste_sum_since(14)
+    prev_week = max(0.0, waste_2weeks - waste_week)
+    waste_delta_pct = None
+    try:
+        if prev_week > 0:
+            waste_delta_pct = int(((waste_week - prev_week) / prev_week) * 100)
+        else:
+            waste_delta_pct = None
+    except Exception:
+        waste_delta_pct = None
+
+    # Format display values
+    total_val = f"{total_items:,}"
+    near_val = str(near_expiry_count)
+    expired_val = str(expired_today_count)
+    waste_val = f"${waste_week:,.2f}"
+    waste_trend_text = (f"{waste_delta_pct}% vs prev week" if waste_delta_pct is not None else "—")
+
     stats_row = ft.Container(
         padding=ft.Padding.symmetric(horizontal=32, vertical=10),
         content=ft.Row(
@@ -370,23 +520,23 @@ def dashboard_view(page: ft.Page) -> ft.View:
             controls=[
                 stat_card(
                     ft.Icons.INVENTORY_2_OUTLINED, colors["SEARCH_BG"],
-                    "Total Items", "1,248",
-                    ft.Icons.TRENDING_UP, "+12% from last month",
+                    "Total Items", total_val,
+                    ft.Icons.TRENDING_UP, "",
                 ),
                 stat_card(
                     ft.Icons.WARNING_AMBER_OUTLINED, colors["ORANGE_BG"],
-                    "Near Expiry", "42",
-                    ft.Icons.TRENDING_UP, "8 needs attention",
+                    "Near Expiry", near_val,
+                    ft.Icons.TRENDING_UP, "needs attention",
                 ),
                 stat_card(
                     ft.Icons.ERROR_OUTLINE, colors["RED_BG"],
-                    "Expired Today", "14",
-                    ft.Icons.TRENDING_DOWN, "-5% from yesterday",
+                    "Expired Today", expired_val,
+                    ft.Icons.TRENDING_DOWN, "",
                 ),
                 stat_card(
                     ft.Icons.ATTACH_MONEY, colors["GREEN_BG"],
-                    "Waste Cost (Wk)", "$1,420",
-                    ft.Icons.TRENDING_UP, "+18% vs prev week",
+                    "Waste Cost (Wk)", waste_val,
+                    ft.Icons.TRENDING_UP, waste_trend_text,
                 ),
             ],
         ),
@@ -394,14 +544,13 @@ def dashboard_view(page: ft.Page) -> ft.View:
 
     # ───────────────────── WASTE DISTRIBUTION ─────────────────────
 
-    waste_data = [
-        ("Meat", 380),
-        ("Dairy", 310),
-        ("Produce", 420),
-        ("Bakery", 200),
-        ("Pantry", 130),
-    ]
-    max_waste = max(v for _, v in waste_data)
+    waste_data = get_waste_distribution(5)
+    if not waste_data:
+        # placeholder when no data
+        waste_data = []
+        max_waste = 1
+    else:
+        max_waste = max(v for _, v in waste_data) or 1
 
     def waste_bar(label, value):
         bar_w = (value / max_waste) * 320
@@ -461,7 +610,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                 ),
                 ft.Column(
                     spacing=2,
-                    controls=[waste_bar(l, v) for l, v in waste_data],
+                    controls=[waste_bar(l, v) for l, v in waste_data] if waste_data else [ft.Text("No waste data yet", color=colors["MUTED"])],
                 ),
             ],
         ),
@@ -469,10 +618,12 @@ def dashboard_view(page: ft.Page) -> ft.View:
 
     # ───────────────────── DAILY WASTE TREND ─────────────────────
 
-    trend_points = [
-        (0, 22), (1, 55), (2, 72), (3, 58), (4, 28), (5, 12),
-    ]
-    target_y = 46
+    trend_points, day_labels = get_daily_trend(7)
+    if not trend_points:
+        trend_points = [(i, 0) for i in range(6)]
+        day_labels = [(date.today() - timedelta(days=5 - i)).strftime("%a") for i in range(6)]
+
+    target_y = int(sum(y for _, y in trend_points) / max(1, len(trend_points)))
 
     trend_series = fch.LineChartData(
         points=[fch.LineChartDataPoint(x, y) for x, y in trend_points],
@@ -488,25 +639,24 @@ def dashboard_view(page: ft.Page) -> ft.View:
     )
 
     target_series = fch.LineChartData(
-        points=[fch.LineChartDataPoint(x, target_y) for x in range(6)],
+        points=[fch.LineChartDataPoint(x, target_y) for x in range(len(trend_points))],
         stroke_width=1.5,
         color="#BBBBBB",
         dash_pattern=[6, 4],
     )
 
-    day_labels = ["Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
     trend_chart = fch.LineChart(
-        data_series=[trend_series, target_series],
-        min_x=0,
-        max_x=5,
-        min_y=0,
-        max_y=85,
-        height=200,
-        expand=True,
+    data_series=[trend_series, target_series],
+    min_x=0,
+    max_x=max(0, len(trend_points) - 1),
+    min_y=0,
+    max_y=max(target_y * 2, 10),
+    height=200,
+    
+    expand=True,
         bgcolor="transparent",
         horizontal_grid_lines=fch.ChartGridLines(
-            interval=20,
+            interval=max(1, int((max(y for _, y in trend_points) or 10) / 4)),
             color=colors["CHART_GRID"],
             width=1,
         ),
@@ -595,13 +745,28 @@ def dashboard_view(page: ft.Page) -> ft.View:
             ),
         )
 
-    expiring_rows_data = [
-        ("Whole Milk 1L", "Dairy", "Tomorrow", "Near Expiry", False),
-        ("Ribeye Steak", "Meat", "Oct 25", "Near Expiry", False),
-        ("Fresh Spinach", "Produce", "Oct 24", "Expired", True),
-        ("Greek Yogurt", "Dairy", "Oct 28", "Near Expiry", False),
-        ("Ciabatta Buns", "Bakery", "Oct 26", "Near Expiry", False),
-    ]
+    # fetch expiring items from DB
+    expiring_rows = get_expiring_items(7, limit=5)
+    expiring_rows_data = []
+    for r in expiring_rows:
+        name = r["item_name"] if r["item_name"] else ""
+        cat = r["category"] if r["category"] else ""
+        ex_date = r["expiry_date"]
+        try:
+            ex_dt = datetime.strptime(ex_date[:10], "%Y-%m-%d").date()
+            days_left = (ex_dt - date.today()).days
+            expired_flag = days_left < 0
+            if expired_flag:
+                ex_text = ex_dt.strftime("%b %d")
+                status = "Expired"
+            else:
+                ex_text = ex_dt.strftime("%b %d") if days_left > 0 else "Today"
+                status = "Near Expiry"
+        except Exception:
+            ex_text = str(ex_date)
+            status = "Near Expiry"
+            expired_flag = False
+        expiring_rows_data.append((name, cat, ex_text, status, expired_flag))
 
     expiring_table = ft.DataTable(
         columns=[
@@ -672,6 +837,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                             ],
                         ),
                         ft.TextButton(
+                            on_click=lambda e: page.go("/expiry"),
                             content=ft.Row(
                                 spacing=4,
                                 controls=[
@@ -689,20 +855,44 @@ def dashboard_view(page: ft.Page) -> ft.View:
                         ),
                     ],
                 ),
-                expiring_table,
+                ft.Container(
+                    height=220,
+                    content=ft.Column(
+                        scroll=ft.ScrollMode.AUTO,
+                        controls=[expiring_table],
+                    ),
+                ),
             ],
         ),
     )
 
     # ───────────────────── RECENT WASTE LOGS TABLE ─────────────────────
 
-    logs_rows_data = [
-        ("Avocado 24ct", "6 units", "Spoiled", "$12.00", "2h ago"),
-        ("Tomato Sauce", "2.5 kg", "Expired", "$8.50", "5h ago"),
-        ("Chicken Breast", "1.2 kg", "Prep Waste", "$14.20", "1d ago"),
-        ("Heavy Cream", "3 units", "Damaged", "$18.00", "1d ago"),
-        ("Bagels", "12 units", "Overproduction", "$9.00", "2d ago"),
-    ]
+    # fetch recent waste logs
+    recent_logs = get_recent_waste_logs(5)
+    logs_rows_data = []
+    for r in recent_logs:
+        item_name = r["item_name"] or "Unknown"
+        qty = r["qty_wasted"]
+        unit = r["unit"] or ""
+        qty_display = f"{qty} {unit}".strip()
+        reason = r["reason"] or ""
+        cost = float(r["cost_estimate"] or 0.0)
+        cost_display = f"${cost:,.2f}"
+        # relative time
+        rec_date = None
+        try:
+            rec_date = datetime.strptime(r["waste_date"][:10], "%Y-%m-%d")
+            diff = datetime.now() - rec_date
+            if diff.days == 0:
+                rec = "Today"
+            elif diff.days == 1:
+                rec = "1d ago"
+            else:
+                rec = f"{diff.days}d ago"
+        except Exception:
+            rec = str(r["waste_date"])
+        logs_rows_data.append((item_name, qty_display, reason, cost_display, rec))
 
     def log_item_cell(name, sub):
         return ft.DataCell(
@@ -804,6 +994,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                             ],
                         ),
                         ft.TextButton(
+                            on_click=lambda e: page.go("/waste-logs"),
                             content=ft.Row(
                                 spacing=4,
                                 controls=[
@@ -821,7 +1012,13 @@ def dashboard_view(page: ft.Page) -> ft.View:
                         ),
                     ],
                 ),
-                logs_table,
+                ft.Container(
+                    height=260,
+                    content=ft.Column(
+                        scroll=ft.ScrollMode.AUTO,
+                        controls=[logs_table],
+                    ),
+                ),
             ],
         ),
     )
