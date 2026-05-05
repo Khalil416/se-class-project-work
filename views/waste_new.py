@@ -1,8 +1,10 @@
 import flet as ft
 import sqlite3
+import requests
 from datetime import datetime
 
 DB_PATH = "inventory.db"
+API_URL = "http://127.0.0.1:8000"
 
 # Color dicts copied from views/inventory.py
 LIGHT = {
@@ -78,14 +80,21 @@ def _init_waste_db():
 
 
 def _get_inventory_items():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT id, item_name, unit FROM inventory ORDER BY item_name")
-    rows = cur.fetchall()
-    conn.close()
-    # return list of dicts
-    return [dict(r) for r in rows]
+    try:
+        response = requests.get(f"{API_URL}/inventory", timeout=5)
+        if response.status_code == 200:
+            return [
+                {
+                    "id": r.get("id"),
+                    "item_name": r.get("item_name"),
+                    "unit": r.get("unit"),
+                    "quantity": r.get("quantity"),
+                }
+                for r in response.json().get("data", [])
+            ]
+    except requests.exceptions.RequestException:
+        pass
+    return []
 
 
 def waste_new_view(page: ft.Page) -> ft.View:
@@ -243,46 +252,50 @@ def waste_new_view(page: ft.Page) -> ft.View:
             unit_price = 0.0
         cost = round(unit_price * qty, 2)
 
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        
-        # Check current inventory quantity
-        cur.execute("SELECT quantity FROM inventory WHERE id=?", (item_id,))
-        row = cur.fetchone()
+        try:
+            response = requests.get(f"{API_URL}/inventory/{item_id}", timeout=5)
+            row = response.json() if response.status_code == 200 else None
+        except requests.exceptions.RequestException:
+            row = None
+
         if not row:
             err_text.value = "Item not found in inventory."
             err_text.visible = True
-            conn.close()
             page.update()
             return
         
-        current_qty = float(row[0])
+        current_qty = float(row.get("quantity", 0))
         if qty > current_qty + 1e-9:
             err_text.value = f"Cannot waste {qty} {unit}. Only {current_qty} {unit} available."
             err_text.visible = True
-            conn.close()
             page.update()
             return
-        
-        # Insert waste log and decrement inventory in transaction
+
         try:
-            cur.execute(
-                "INSERT INTO waste_logs (item_id, qty_wasted, unit, reason, waste_date, notes, cost_estimate) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (item_id, qty, unit, reason, waste_date, notes, cost),
+            response = requests.post(
+                f"{API_URL}/waste-logs",
+                json={
+                    "item_id": item_id,
+                    "qty_wasted": qty,
+                    "unit": unit,
+                    "reason": reason,
+                    "waste_date": waste_date,
+                    "notes": notes,
+                    "cost_estimate": cost,
+                },
+                timeout=5,
             )
-            # Round to avoid float artifacts like 9.600000000000001 in SQLite/UI.
-            new_qty = round(max(0.0, current_qty - qty), 3)
-            cur.execute("UPDATE inventory SET quantity=? WHERE id=?", (new_qty, item_id))
-            conn.commit()
-        except Exception as ex:
-            conn.rollback()
+            data = response.json()
+            if data.get("error"):
+                err_text.value = data["error"]
+                err_text.visible = True
+                page.update()
+                return
+        except requests.exceptions.RequestException as ex:
             err_text.value = f"Error saving waste: {str(ex)}"
             err_text.visible = True
-            conn.close()
             page.update()
             return
-        finally:
-            conn.close()
 
         if page.session.store.contains_key("waste_item_id"):
             page.session.store.remove("waste_item_id")

@@ -1,8 +1,10 @@
 import flet as ft
 import sqlite3
+import requests
 from datetime import datetime
 
 DB_PATH = "inventory.db"
+API_URL = "http://127.0.0.1:8000"
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -89,23 +91,26 @@ def _init_expiry_db():
 
 
 def _get_items(search_text=""):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    query = (
-        "SELECT id, item_name, sku, category, quantity, unit, expiry_date, batch_number "
-        "FROM inventory WHERE 1=1"
-    )
-    params = []
-    if search_text:
-        query += " AND (item_name LIKE ? OR sku LIKE ? OR batch_number LIKE ?)"
-        like = f"%{search_text}%"
-        params.extend([like, like, like])
-    query += " ORDER BY item_name"
-    cur.execute(query, params)
-    rows = cur.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    try:
+        response = requests.get(f"{API_URL}/inventory", params={"search": search_text}, timeout=5)
+        if response.status_code == 200:
+            rows = response.json().get("data", [])
+            return [
+                {
+                    "id": r.get("id"),
+                    "item_name": r.get("item_name"),
+                    "sku": r.get("sku"),
+                    "category": r.get("category"),
+                    "quantity": r.get("quantity"),
+                    "unit": r.get("unit"),
+                    "expiry_date": r.get("expiry_date"),
+                    "batch_number": r.get("batch_number", ""),
+                }
+                for r in rows
+            ]
+    except requests.exceptions.RequestException:
+        pass
+    return []
 
 
 def expiry_monitor_view(page: ft.Page) -> ft.View:

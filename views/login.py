@@ -1,5 +1,8 @@
 import flet as ft
 import sqlite3
+import requests
+API_URL = "http://127.0.0.1:8000"
+
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -258,32 +261,26 @@ def login_view(page: ft.Page) -> ft.View:
             page.update()
             return
 
-        # Check credentials against the database
-        conn = sqlite3.connect("reg.db")
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id, username, role, is_active FROM users WHERE (username = ? OR email = ?) AND password = ?",
-            (username, username, password),
-        )
-        user = cur.fetchone()
-        if user and (user[3] == 0 or user[3] == '0'):
-            error_text.value = "Your account has been deactivated. Please contact your manager."
+        try:
+            response = requests.post(f"{API_URL}/auth/login", json={"username": username, "password": password}, timeout=5)
+            data = response.json()
+        except requests.exceptions.RequestException:
+            error_text.value = "Cannot reach API server. Start uvicorn api:app on port 8000."
             error_text.visible = True
-            conn.close()
             page.update()
             return
-        conn.close()
 
-        if user:
-            page.session.store.set("is_logged_in", True)
-            page.session.store.set("username", user[1])
-            page.session.store.set("role", user[2])
-            page.session.store.set("user_id", user[0])
-            page.go("/dashboard")
-        else:
-            error_text.value = "Invalid credentials. Please check your username and password."
+        if data.get("error"):
+            error_text.value = data["error"]
             error_text.visible = True
             page.update()
+            return
+
+        page.session.store.set("is_logged_in", True)
+        page.session.store.set("username", data.get("username"))
+        page.session.store.set("role", data.get("role"))
+        page.session.store.set("user_id", data.get("user_id"))
+        page.go("/dashboard")
 
     sign_in_button = ft.Button(
         width=452,

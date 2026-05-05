@@ -2,8 +2,10 @@ import flet as ft
 import sqlite3
 import math
 from datetime import datetime, timedelta
+import requests
 
 DB_PATH = "inventory.db"
+API_URL = "http://127.0.0.1:8000"
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -94,30 +96,35 @@ def _init_inventory_db():
 
 
 def _get_items(search="", category="All Categories", status="All Status", storage="All Storage"):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    query = "SELECT id, item_name, sku, category, quantity, unit, storage, expiry_date FROM inventory WHERE 1=1"
-    params = []
-
-    if search:
-        query += " AND (item_name LIKE ? OR sku LIKE ?)"
-        params.extend([f"%{search}%", f"%{search}%"])
-    if category != "All Categories":
-        query += " AND category = ?"
-        params.append(category)
-    if storage != "All Storage":
-        query += " AND storage = ?"
-        params.append(storage)
-
-    query += " ORDER BY id ASC"
-    cur.execute(query, params)
-    rows = cur.fetchall()
-    conn.close()
+    try:
+        response = requests.get(
+            f"{API_URL}/inventory",
+            params={
+                "search": search,
+                "category": "" if category == "All Categories" else category,
+                "status": "" if status == "All Status" else status,
+                "storage": "" if storage == "All Storage" else storage,
+            },
+            timeout=5,
+        )
+        rows = response.json().get("data", []) if response.status_code == 200 else []
+    except requests.exceptions.RequestException:
+        rows = []
 
     # Filter by status in Python (computed from expiry_date)
     today = datetime.now().date()
     filtered = []
-    for r in rows:
+    for row in rows:
+        r = (
+            row.get("id"),
+            row.get("item_name"),
+            row.get("sku"),
+            row.get("category"),
+            row.get("quantity"),
+            row.get("unit"),
+            row.get("storage"),
+            row.get("expiry_date"),
+        )
         try:
             exp = datetime.strptime(r[7], "%Y-%m-%d").date()
         except ValueError:
@@ -140,26 +147,26 @@ def _get_items(search="", category="All Categories", status="All Status", storag
 
 
 def _delete_item(item_id):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM inventory WHERE id=?", (item_id,))
-    conn.commit()
-    conn.close()
+    try:
+        requests.delete(f"{API_URL}/inventory/{item_id}", timeout=5)
+    except requests.exceptions.RequestException:
+        pass
 
 
 def _get_stats():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(DISTINCT category) FROM inventory")
-    total_categories = cur.fetchone()[0]
-    cur.execute("SELECT expiry_date FROM inventory")
-    rows = cur.fetchall()
-    conn.close()
+    try:
+        response = requests.get(f"{API_URL}/inventory", timeout=5)
+        rows = response.json().get("data", []) if response.status_code == 200 else []
+    except requests.exceptions.RequestException:
+        rows = []
+
+    total_categories = len({r.get("category") for r in rows if r.get("category")})
 
     today = datetime.now().date()
     near_expiry = 0
     expired = 0
-    for (exp_str,) in rows:
+    for row in rows:
+        exp_str = row.get("expiry_date", "")
         try:
             exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
         except ValueError:
@@ -170,11 +177,12 @@ def _get_stats():
         elif days_left <= 7:
             near_expiry += 1
 
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT SUM(quantity * 10) FROM inventory")  # rough estimate $10/unit
-    stock_val = cur.fetchone()[0] or 0
-    conn.close()
+    stock_val = 0
+    for row in rows:
+        try:
+            stock_val += float(row.get("quantity", 0) or 0) * 10
+        except Exception:
+            pass
 
     return total_categories, near_expiry, expired, int(stock_val)
 

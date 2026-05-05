@@ -1,7 +1,9 @@
 import flet as ft
 import sqlite3
+import requests
 
 DB_PATH = "reg.db"
+API_URL = "http://127.0.0.1:8000"
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -55,63 +57,56 @@ DARK = {
 
 
 def _get_users(search="", role_filter="All Roles"):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    query = "SELECT id, username, email, role, is_active FROM users WHERE 1=1"
-    params = []
-    if search:
-        query += " AND (username LIKE ? OR email LIKE ?)"
-        like = f"%{search}%"
-        params.extend([like, like])
-    if role_filter != "All Roles":
-        query += " AND role = ?"
-        params.append(role_filter)
-    query += " ORDER BY id DESC"
-    cur.execute(query, params)
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    return rows
+    try:
+        params = {}
+        if search:
+            params["search"] = search
+        if role_filter != "All Roles":
+            params["role"] = role_filter
+        response = requests.get(f"{API_URL}/users", params=params, timeout=5)
+        if response.status_code == 200:
+            return response.json().get("data", [])
+    except requests.exceptions.RequestException:
+        pass
+    return []
 
 
 def _add_user(username, email, password, role):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
     try:
-        cur.execute(
-            "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, ?)",
-            (username, email, password, role, 1),
+        response = requests.post(
+            f"{API_URL}/users",
+            json={"username": username, "email": email, "password": password, "role": role},
+            timeout=5,
         )
-        conn.commit()
-    except sqlite3.IntegrityError:
-        conn.close()
-        return "Username or email already exists."
-    conn.close()
+        data = response.json()
+        if data.get("error"):
+            return data["error"]
+    except requests.exceptions.RequestException:
+        return "Cannot reach API server."
     return None
 
 
 def _update_user(user_id, email, role):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("UPDATE users SET email=?, role=? WHERE id=?", (email, role, user_id))
-    conn.commit()
-    conn.close()
+    try:
+        requests.put(f"{API_URL}/users/{user_id}", json={"email": email, "role": role}, timeout=5)
+    except requests.exceptions.RequestException:
+        return "Cannot reach API server."
 
 
 def _toggle_user_active(user_id, is_active):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("UPDATE users SET is_active=? WHERE id=?", (1 if is_active else 0, user_id))
-    conn.commit()
-    conn.close()
-
-
+    try:
+        response = requests.patch(f"{API_URL}/users/{user_id}/active", params={"is_active": (not is_active)}, timeout=5)
+        if response.status_code >= 400:
+            data = response.json() if response.content else {}
+            return data.get("detail") or data.get("error") or "Cannot update user status."
+    except requests.exceptions.RequestException:
+        return "Cannot reach API server."
+    return None
 def _delete_user(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM users WHERE id=?", (user_id,))
-    conn.commit()
-    conn.close()
+    try:
+        requests.delete(f"{API_URL}/users/{user_id}", timeout=5)
+    except requests.exceptions.RequestException:
+        return "Cannot reach API server."
 
 
 def _get_role_label(r):
@@ -267,14 +262,14 @@ def users_staff_view(page: ft.Page) -> ft.View:
 
     def try_toggle_active(user_id, is_active):
         # Lookup user
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute("SELECT username, role FROM users WHERE id=?", (user_id,))
-        row = cur.fetchone()
-        conn.close()
+        try:
+            response = requests.get(f"{API_URL}/users/{user_id}", timeout=5)
+            row = response.json() if response.status_code == 200 else None
+        except requests.exceptions.RequestException:
+            row = None
         if not row:
             return
-        target_username, target_role = row[0], row[1]
+        target_username, target_role = row.get("username"), row.get("role")
         if target_username == "manager":
             page.snack_bar = ft.SnackBar(ft.Text("The head manager account cannot be modified.", color="#FFFFFF"))
             page.snack_bar.open = True
@@ -285,7 +280,12 @@ def users_staff_view(page: ft.Page) -> ft.View:
             page.snack_bar.open = True
             page.update()
             return
-        _toggle_user_active(user_id, not is_active)
+        err = _toggle_user_active(user_id, not is_active)
+        if err:
+            page.snack_bar = ft.SnackBar(ft.Text(err, color="#FFFFFF"))
+            page.snack_bar.open = True
+            page.update()
+            return
         refresh_grid()
 
     def try_delete_user(user):

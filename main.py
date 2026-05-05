@@ -12,6 +12,8 @@ from views.categories import categories_view
 from views.users_staff import users_staff_view
 from views.account import account_view
 from views.registration import registration_view
+from views.api_records import api_records_view
+
 
 def main(page: ft.Page):
     page.title = "Kitchen Waste Tracker"
@@ -33,7 +35,7 @@ def main(page: ft.Page):
         user_role = page.session.store.get("role") or "chef"
 
         # Login check for protected routes
-        protected_routes = ["/dashboard", "/inventory", "/add-item", "/waste/new", "/expiry", "/waste-logs", "/reports", "/categories", "/users", "/account", "/register"]
+        protected_routes = ["/dashboard", "/inventory", "/add-item", "/waste/new", "/expiry", "/waste-logs", "/reports", "/categories", "/users", "/account", "/register", "/api-records"]
         if any(page.route == r for r in protected_routes) and not is_logged_in:
             page.route = "/"
         
@@ -42,7 +44,7 @@ def main(page: ft.Page):
 
         # Role-based access control
         # Manager-only routes
-        if page.route in ("/reports", "/categories", "/users") and user_role != "manager":
+        if page.route in ("/reports", "/categories", "/users", "/api-records") and user_role != "manager":
             page.route = "/dashboard"
         
         # Manager + Inventory Staff routes
@@ -92,6 +94,9 @@ def main(page: ft.Page):
 
         if page.route == "/users":
             page.views.append(users_staff_view(page))
+
+        if page.route == "/api-records":
+            page.views.append(api_records_view(page))
 
         if page.route == "/account":
             page.views.append(account_view(page))

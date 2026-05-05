@@ -1,8 +1,10 @@
 import flet as ft
 import sqlite3
+import requests
 from datetime import datetime
 
 DB_PATH = "inventory.db"
+API_URL = "http://127.0.0.1:8000"
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -56,41 +58,42 @@ DARK = {
 
 
 def _get_item(item_id):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id, item_name, sku, category, quantity, unit, storage, expiry_date, "
-        "purchase_date, internal_notes, batch_number, alert_threshold FROM inventory WHERE id=?",
-        (item_id,),
-    )
-    row = cur.fetchone()
-    conn.close()
-    return row
+    try:
+        response = requests.get(f"{API_URL}/inventory/{item_id}", timeout=5)
+        if response.status_code == 200:
+            return response.json()
+    except requests.exceptions.RequestException:
+        pass
+    return None
 
 
 def _get_waste_history(item_id):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
     try:
-        cur.execute(
-            "SELECT qty_wasted, unit, reason, cost_estimate, waste_date FROM waste_logs WHERE item_id=? ORDER BY waste_date DESC",
-            (item_id,),
-        )
-        rows = cur.fetchall()
-    except Exception:
-        rows = []
-    conn.close()
-    return [dict(r) for r in rows]
+        response = requests.get(f"{API_URL}/waste-logs", params={"item_id": item_id}, timeout=5)
+        if response.status_code == 200:
+            return response.json().get("data", [])
+    except requests.exceptions.RequestException:
+        pass
+    return []
 
 
 def _update_quantity(item_id, new_qty):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("UPDATE inventory SET quantity=? WHERE id=?", (round(float(new_qty), 3), item_id))
-    conn.commit()
-    conn.close()
+    try:
+        item = _get_item(item_id) or {}
+        requests.put(
+            f"{API_URL}/inventory/{item_id}",
+            json={
+                "item_name": item.get("item_name", ""),
+                "category": item.get("category", ""),
+                "quantity": round(float(new_qty), 3),
+                "unit": item.get("unit", ""),
+                "storage": item.get("storage", ""),
+                "expiry_date": item.get("expiry_date", "1970-01-01"),
+            },
+            timeout=5,
+        )
+    except requests.exceptions.RequestException:
+        pass
 
 
 def _get_status_info(expiry_str, colors):
