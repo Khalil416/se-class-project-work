@@ -1,7 +1,9 @@
 import flet as ft
 import sqlite3
+import requests
 
 DB_PATH = "inventory.db"
+API_URL = "http://127.0.0.1:8000"
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -96,42 +98,35 @@ def _init_categories_db():
 
 
 def _get_categories(search_text=""):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    query = "SELECT category_id, category_name, description, shelf_life_days FROM categories WHERE 1=1"
-    params = []
-    if search_text:
-        query += " AND (category_name LIKE ? OR description LIKE ?)"
-        like = f"%{search_text}%"
-        params.extend([like, like])
-    query += " ORDER BY category_name COLLATE NOCASE"
-    cur.execute(query, params)
-    rows = [dict(row) for row in cur.fetchall()]
-    conn.close()
-    return rows
+    try:
+        response = requests.get(f"{API_URL}/categories", params={"search_text": search_text}, timeout=5)
+        if response.status_code == 200:
+            return response.json().get("data", [])
+    except requests.exceptions.RequestException:
+        pass
+    return []
 
 
 def _get_metrics():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM categories")
-    total_categories = cur.fetchone()[0] or 0
-    cur.execute("SELECT COUNT(*) FROM inventory")
-    tracked_items = cur.fetchone()[0] or 0
-    cur.execute("SELECT AVG(shelf_life_days) FROM categories")
-    avg_shelf_life = cur.fetchone()[0] or 0
-    conn.close()
-    return total_categories, tracked_items, avg_shelf_life
+    try:
+        categories = requests.get(f"{API_URL}/categories", timeout=5).json().get("data", [])
+        inventory = requests.get(f"{API_URL}/inventory", timeout=5).json().get("data", [])
+        total_categories = len(categories)
+        tracked_items = len(inventory)
+        avg_shelf_life = sum(float(c.get("shelf_life_days") or 0) for c in categories) / total_categories if total_categories else 0
+        return total_categories, tracked_items, avg_shelf_life
+    except requests.exceptions.RequestException:
+        return 0, 0, 0
 
 
 def _get_total_items(category_name):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM inventory WHERE category = ?", (category_name,))
-    total = cur.fetchone()[0] or 0
-    conn.close()
-    return total
+    try:
+        response = requests.get(f"{API_URL}/inventory", params={"category": category_name}, timeout=5)
+        if response.status_code == 200:
+            return response.json().get("count", 0)
+    except requests.exceptions.RequestException:
+        pass
+    return 0
 
 
 def categories_view(page: ft.Page) -> ft.View:

@@ -1,7 +1,9 @@
 import flet as ft
 import sqlite3
+import requests
 
 DB_PATH = "reg.db"
+API_URL = "http://127.0.0.1:8000"
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -31,16 +33,20 @@ DARK = {
 
 
 def _get_account(user_id=None, username=None):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    if user_id is not None:
-        cur.execute("SELECT * FROM users WHERE id=?", (user_id,))
-    else:
-        cur.execute("SELECT * FROM users WHERE username=?", (username,))
-    row = cur.fetchone()
-    conn.close()
-    return dict(row) if row else None
+    try:
+        if user_id is not None:
+            response = requests.get(f"{API_URL}/users/{user_id}", timeout=5)
+            if response.status_code == 200:
+                return response.json()
+        if username:
+            response = requests.get(f"{API_URL}/users", params={"search": username}, timeout=5)
+            if response.status_code == 200:
+                for row in response.json().get("data", []):
+                    if row.get("username") == username:
+                        return row
+    except requests.exceptions.RequestException:
+        pass
+    return None
 
 
 def account_view(page: ft.Page) -> ft.View:

@@ -1,9 +1,11 @@
 import flet as ft
 import flet_charts as fch
 import sqlite3
+import requests
 from datetime import date, datetime, timedelta
 
 DB_PATH = "inventory.db"
+API_URL = "http://127.0.0.1:8000"
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -93,33 +95,25 @@ def _period_range(period):
 
 def _fetch_rows(period, search_text=""):
     start_date, end_date = _period_range(period)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    query = """
-        SELECT
-            wl.log_id,
-            wl.item_id,
-            wl.qty_wasted,
-            wl.unit,
-            wl.reason,
-            wl.waste_date,
-            wl.cost_estimate,
-            i.item_name,
-            i.category
-        FROM waste_logs wl
-        LEFT JOIN inventory i ON i.id = wl.item_id
-        WHERE wl.waste_date BETWEEN ? AND ?
-    """
-    params = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
-    if search_text:
-        query += " AND (i.item_name LIKE ? OR i.category LIKE ? OR wl.reason LIKE ?)"
-        like = f"%{search_text}%"
-        params.extend([like, like, like])
-    cur.execute(query + " ORDER BY wl.waste_date ASC, wl.log_id ASC", params)
-    rows = [dict(row) for row in cur.fetchall()]
-    conn.close()
-    return rows, start_date, end_date
+    try:
+        response = requests.get(f"{API_URL}/waste-logs", timeout=5)
+        rows = response.json().get("data", []) if response.status_code == 200 else []
+    except requests.exceptions.RequestException:
+        rows = []
+
+    filtered = []
+    start_s = start_date.strftime("%Y-%m-%d")
+    end_s = end_date.strftime("%Y-%m-%d")
+    for row in rows:
+        waste_date = row.get("waste_date", "")
+        if not (start_s <= waste_date <= end_s):
+            continue
+        if search_text:
+            haystack = " ".join(str(row.get(k, "")) for k in ("item_name", "category", "reason"))
+            if search_text.lower() not in haystack.lower():
+                continue
+        filtered.append(row)
+    return filtered, start_date, end_date
 
 
 def _aggregate_by_day(rows, start_date, end_date):
@@ -528,7 +522,7 @@ def reports_view(page: ft.Page) -> ft.View:
             "other": colors["MUTED"],
         }.get((reason or "other").lower(), colors["MUTED"])
 
-    def rebuild_charts(rows, start_date, end_date):
+    def rebuild_charts(rows, start_date, end_date, period):
         total_loss = sum(float(row.get("cost_estimate") or 0) for row in rows)
         avoidable_loss = sum(float(row.get("cost_estimate") or 0) for row in rows if (row.get("reason") or "").lower() in {"prep_waste", "overproduction"})
         efficiency = max(0.0, 100.0 - ((avoidable_loss / total_loss) * 100.0 if total_loss else 0.0))
@@ -536,7 +530,14 @@ def reports_view(page: ft.Page) -> ft.View:
         metric_value_total.value = format_money(total_loss)
         metric_value_eff.value = f"{efficiency:.1f}%"
 
-        labels, values = _aggregate_by_day(rows, start_date, end_date)
+        try:
+            summary_response = requests.get(f"{API_URL}/reports/summary", params={"period": period}, timeout=5)
+            summary_rows = summary_response.json().get("data", []) if summary_response.status_code == 200 else []
+        except requests.exceptions.RequestException:
+            summary_rows = []
+
+        labels = [row.get("label", "") for row in summary_rows]
+        values = [float(row.get("cost", 0) or 0) for row in summary_rows]
         max_y = max(values) if values else 1
         max_y = max(max_y, 1)
         points = [fch.LineChartDataPoint(i, value) for i, value in enumerate(values)]
@@ -559,7 +560,13 @@ def reports_view(page: ft.Page) -> ft.View:
         )
         trend_chart_host.content = trend_chart
 
-        reason_totals = _aggregate_reason_cost(rows)
+        try:
+            reason_response = requests.get(f"{API_URL}/reports/by-reason", params={"period": period}, timeout=5)
+            reason_rows = reason_response.json().get("data", []) if reason_response.status_code == 200 else []
+        except requests.exceptions.RequestException:
+            reason_rows = []
+
+        reason_totals = {row.get("reason", "other"): float(row.get("cost_total") or 0) for row in reason_rows}
         reason_chart_host.controls = []
         if reason_totals:
             max_reason_cost = max(reason_totals.values()) if reason_totals else 1
@@ -612,7 +619,7 @@ def reports_view(page: ft.Page) -> ft.View:
     def rebuild_page():
         search_text = (search_field.value or "").strip()
         rows, start_date, end_date = _fetch_rows(selected_period[0], search_text=search_text)
-        rebuild_charts(rows, start_date, end_date)
+        rebuild_charts(rows, start_date, end_date, selected_period[0])
 
         period_label_text.value = period_range_label(selected_period[0])
         period_buttons["daily"].bgcolor = colors["ORANGE"] if selected_period[0] == "daily" else colors["CARD_BG"]

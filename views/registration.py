@@ -2,8 +2,10 @@ import flet as ft
 import sqlite3
 import os
 import re
+import requests
 
 DB_PATH = "reg.db"
+API_URL = "http://127.0.0.1:8000"
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -59,20 +61,18 @@ def _init_db():
 
 
 def _register_user(username: str, email: str, password: str, role: str = "chef") -> str | None:
-    """Insert a new user. Returns an error message string on failure, None on success."""
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
     try:
-        cur.execute(
-            "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
-            (username, email, password, role),
+        response = requests.post(
+            f"{API_URL}/users",
+            json={"username": username, "email": email, "password": password, "role": role},
+            timeout=5,
         )
-        conn.commit()
+        data = response.json()
+        if data.get("error"):
+            return data["error"]
         return None
-    except sqlite3.IntegrityError:
-        return "Username or email already exists."
-    finally:
-        conn.close()
+    except requests.exceptions.RequestException:
+        return "Cannot reach API server."
 
 
 def registration_view(page: ft.Page) -> ft.View:

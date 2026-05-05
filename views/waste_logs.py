@@ -1,8 +1,10 @@
 import flet as ft
 import sqlite3
+import requests
 from datetime import datetime, date
 
 DB_PATH = "inventory.db"
+API_URL = "http://127.0.0.1:8000"
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -77,38 +79,11 @@ def _init_waste_logs_db():
 
 
 def _fetch_waste_logs(search_text="", date_from="", date_to="", reason="All Reasons"):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    query = """
-        SELECT
-            wl.log_id,
-            wl.item_id,
-            wl.qty_wasted,
-            wl.unit,
-            wl.reason,
-            wl.waste_date,
-            wl.notes,
-            wl.cost_estimate,
-            i.item_name,
-            i.category
-        FROM waste_logs wl
-        LEFT JOIN inventory i ON i.id = wl.item_id
-        WHERE 1=1
-    """
-    params = []
-    if search_text:
-        like = f"%{search_text}%"
-        query += " AND (wl.reason LIKE ? OR i.item_name LIKE ? OR i.category LIKE ? OR wl.unit LIKE ? OR CAST(wl.qty_wasted AS TEXT) LIKE ?)"
-        params.extend([like, like, like, like, like])
-    # Apply reason filter (dropdown sends lowercase keys: expired, spoiled, etc.)
-    if reason and reason not in ("All Reasons",):
-        query += " AND LOWER(wl.reason) = ?"
-        params.append(reason.lower())
-    query += " ORDER BY wl.waste_date DESC, wl.log_id DESC"
-    cur.execute(query, params)
-    rows = [dict(row) for row in cur.fetchall()]
-    conn.close()
+    try:
+        response = requests.get(f"{API_URL}/waste-logs", timeout=5)
+        rows = response.json().get("data", []) if response.status_code == 200 else []
+    except requests.exceptions.RequestException:
+        rows = []
 
     filtered = []
     for row in rows:

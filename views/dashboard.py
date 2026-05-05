@@ -1,7 +1,10 @@
 import flet as ft
 import flet_charts as fch
 import sqlite3
+import requests
 from datetime import datetime, timedelta, date
+
+API_URL = "http://127.0.0.1:8000"
 
 
 LIGHT = {
@@ -87,128 +90,84 @@ def dashboard_view(page: ft.Page) -> ft.View:
 
     def get_total_items():
         try:
-            conn = _connect()
-            cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM inventory")
-            r = cur.fetchone()
-            conn.close()
-            return _safe_int(r[0]) if r else 0
+            response = requests.get(f"{API_URL}/dashboard/stats", timeout=5)
+            if response.status_code == 200:
+                return response.json().get("total_items", 0)
         except Exception:
             return 0
 
     def get_near_expiry(days=7):
         try:
-            today = date.today()
-            end = today + timedelta(days=days)
-            conn = _connect()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT COUNT(*) FROM inventory WHERE DATE(expiry_date) BETWEEN DATE(?) AND DATE(?)",
-                (today.isoformat(), end.isoformat()),
-            )
-            r = cur.fetchone()
-            conn.close()
-            return _safe_int(r[0]) if r else 0
+            response = requests.get(f"{API_URL}/dashboard/stats", timeout=5)
+            if response.status_code == 200:
+                return response.json().get("items_near_expiry", 0)
         except Exception:
             return 0
 
     def get_expired_today():
         try:
-            today = date.today().isoformat()
-            conn = _connect()
-            cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM inventory WHERE DATE(expiry_date) < DATE(?)", (today,))
-            r = cur.fetchone()
-            conn.close()
-            return _safe_int(r[0]) if r else 0
+            response = requests.get(f"{API_URL}/dashboard/stats", timeout=5)
+            if response.status_code == 200:
+                return response.json().get("items_expired", 0)
         except Exception:
             return 0
 
     def get_waste_sum_since(days=7):
         try:
+            if days == 7:
+                response = requests.get(f"{API_URL}/dashboard/stats", timeout=5)
+                if response.status_code == 200:
+                    return float(response.json().get("weekly_waste_cost", 0.0))
+            response = requests.get(f"{API_URL}/waste-logs", timeout=5)
+            rows = response.json().get("data", []) if response.status_code == 200 else []
             cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
-            conn = _connect()
-            cur = conn.cursor()
-            cur.execute("SELECT SUM(cost_estimate) FROM waste_logs WHERE DATE(waste_date) >= DATE(?)", (cutoff,))
-            r = cur.fetchone()
-            conn.close()
-            return float(r[0]) if r and r[0] is not None else 0.0
+            total = 0.0
+            for row in rows:
+                if (row.get("waste_date") or "") >= cutoff:
+                    total += float(row.get("cost_estimate") or 0)
+            return total
         except Exception:
             return 0.0
 
     def get_waste_distribution(top_n=5):
         try:
-            conn = _connect()
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT COALESCE(i.category, 'Uncategorized') as category, SUM(w.cost_estimate) as total
-                FROM waste_logs w
-                LEFT JOIN inventory i ON w.item_id = i.id
-                GROUP BY category
-                ORDER BY total DESC
-                LIMIT ?
-                """,
-                (top_n,)
-            )
-            rows = cur.fetchall()
-            conn.close()
-            return [(r["category"], float(r["total"] or 0.0)) for r in rows]
+            response = requests.get(f"{API_URL}/dashboard/waste-summary", timeout=5)
+            rows = response.json().get("data", []) if response.status_code == 200 else []
+            return [(row.get("reason") or "other", float(row.get("cost_total") or 0)) for row in rows[:top_n]]
         except Exception:
             return []
 
     def get_daily_trend(days=7):
         try:
-            conn = _connect()
-            cur = conn.cursor()
+            response = requests.get(f"{API_URL}/waste-logs", timeout=5)
+            rows = response.json().get("data", []) if response.status_code == 200 else []
             results = []
             labels = []
             for i in range(days - 1, -1, -1):
                 dt = date.today() - timedelta(days=i)
                 labels.append(dt.strftime("%a"))
-                cur.execute("SELECT SUM(cost_estimate) FROM waste_logs WHERE DATE(waste_date)=DATE(?)", (dt.isoformat(),))
-                r = cur.fetchone()
-                results.append(float(r[0]) if r and r[0] is not None else 0.0)
-            conn.close()
-            # points as (x, y) where x indexes labels
-            points = [(i, v) for i, v in enumerate(results)]
-            return points, labels
+                total = 0.0
+                for row in rows:
+                    if (row.get("waste_date") or "") == dt.isoformat():
+                        total += float(row.get("cost_estimate") or 0)
+                results.append(total)
+            return [(i, v) for i, v in enumerate(results)], labels
         except Exception:
             return [], []
 
     def get_expiring_items(days=7, limit=5):
         try:
-            today = date.today()
-            end = today + timedelta(days=days)
-            conn = _connect()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT id, item_name, category, expiry_date FROM inventory WHERE DATE(expiry_date) BETWEEN DATE(?) AND DATE(?) ORDER BY DATE(expiry_date) ASC LIMIT ?",
-                (today.isoformat(), end.isoformat(), limit),
-            )
-            rows = cur.fetchall()
-            conn.close()
-            return rows
+            response = requests.get(f"{API_URL}/inventory", params={"status": "Expiring Soon"}, timeout=5)
+            if response.status_code == 200:
+                return response.json().get("data", [])[:limit]
         except Exception:
             return []
 
     def get_recent_waste_logs(limit=5):
         try:
-            conn = _connect()
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT w.qty_wasted, w.unit, w.reason, w.cost_estimate, w.waste_date, i.item_name
-                FROM waste_logs w
-                LEFT JOIN inventory i ON w.item_id = i.id
-                ORDER BY DATE(w.waste_date) DESC, w.rowid DESC
-                LIMIT ?
-                """,
-                (limit,)
-            )
-            rows = cur.fetchall()
-            conn.close()
-            return rows
+            response = requests.get(f"{API_URL}/waste-logs", timeout=5)
+            if response.status_code == 200:
+                return response.json().get("data", [])[:limit]
         except Exception:
             return []
 

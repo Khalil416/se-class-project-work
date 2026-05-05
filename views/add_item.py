@@ -1,8 +1,10 @@
 import flet as ft
 import sqlite3
+import requests
 from datetime import datetime
 
 DB_PATH = "inventory.db"
+API_URL = "http://127.0.0.1:8000"
 
 LIGHT = {
     "ORANGE": "#E68A17",
@@ -86,13 +88,11 @@ STORAGE_MAP = {s: s for s in STORAGES}
 def _get_categories_from_db():
     """Fetch category list from categories table in DB, fallback to CATEGORIES if empty."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute("SELECT category_name FROM categories ORDER BY category_name ASC")
-        rows = cur.fetchall()
-        conn.close()
-        if rows:
-            return [r[0] for r in rows]
+        response = requests.get(f"{API_URL}/categories", timeout=5)
+        if response.status_code == 200:
+            rows = response.json().get("data", [])
+            if rows:
+                return [r.get("category_name") for r in rows if r.get("category_name")]
     except Exception:
         pass
     return CATEGORIES
@@ -119,60 +119,58 @@ def _ensure_columns():
 
 def _add_item(item_name, category, storage, quantity, unit, purchase_date,
               internal_notes, batch_number, expiry_date, alert_threshold):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    # Auto-generate SKU
-    cur.execute("SELECT MAX(id) FROM inventory")
-    next_id = (cur.fetchone()[0] or 0) + 1
-    sku = f"SKU-{next_id:05d}"
     try:
-        cur.execute(
-            """INSERT INTO inventory
-               (item_name, sku, category, quantity, unit, storage, expiry_date,
-                purchase_date, internal_notes, batch_number, alert_threshold)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (item_name, sku, category, float(quantity), unit, storage,
-             expiry_date, purchase_date, internal_notes, batch_number, int(alert_threshold)),
+        response = requests.post(
+            f"{API_URL}/inventory",
+            json={
+                "item_name": item_name,
+                "category": category,
+                "quantity": float(quantity),
+                "unit": unit,
+                "storage": storage,
+                "expiry_date": expiry_date,
+            },
+            timeout=5,
         )
-        conn.commit()
+        data = response.json()
+        if data.get("error"):
+            return data["error"]
         return None
-    except sqlite3.IntegrityError:
-        return "Item could not be saved (duplicate SKU)."
-    finally:
-        conn.close()
+    except requests.exceptions.RequestException:
+        return "Cannot reach API server."
 
 
 def _update_item(item_id, item_name, category, storage, quantity, unit,
                  purchase_date, internal_notes, batch_number, expiry_date, alert_threshold):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
     try:
-        cur.execute(
-            """UPDATE inventory
-               SET item_name=?, category=?, quantity=?, unit=?, storage=?,
-                   expiry_date=?, purchase_date=?, internal_notes=?,
-                   batch_number=?, alert_threshold=?
-               WHERE id=?""",
-            (item_name, category, float(quantity), unit, storage,
-             expiry_date, purchase_date, internal_notes, batch_number,
-             int(alert_threshold), item_id),
+        response = requests.put(
+            f"{API_URL}/inventory/{item_id}",
+            json={
+                "item_name": item_name,
+                "category": category,
+                "quantity": float(quantity),
+                "unit": unit,
+                "storage": storage,
+                "expiry_date": expiry_date,
+            },
+            timeout=5,
         )
-        conn.commit()
+        data = response.json()
+        if data.get("error"):
+            return data["error"]
         return None
-    except Exception as ex:
+    except requests.exceptions.RequestException as ex:
         return str(ex)
-    finally:
-        conn.close()
 
 
 def _get_item(item_id):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM inventory WHERE id=?", (item_id,))
-    row = cur.fetchone()
-    conn.close()
-    return dict(row) if row else None
+    try:
+        response = requests.get(f"{API_URL}/inventory/{item_id}", timeout=5)
+        if response.status_code == 200:
+            return response.json()
+    except requests.exceptions.RequestException:
+        pass
+    return None
 
 
 def add_item_view(page: ft.Page) -> ft.View:
