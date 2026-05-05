@@ -6,20 +6,6 @@ from backend.db import INVENTORY_DB, connect, log, rows_to_dicts
 router = APIRouter(tags=["analytics"])
 
 
-def _inventory_status(expiry_date: str) -> str:
-    try:
-        exp = datetime.strptime(expiry_date, "%Y-%m-%d").date()
-    except Exception:
-        return "Fresh"
-    today = date.today()
-    days_left = (exp - today).days
-    if days_left < 0:
-        return "Expired"
-    if days_left <= 7:
-        return "Expiring Soon"
-    return "Fresh"
-
-
 def _load_inventory():
     conn = connect(INVENTORY_DB)
     cur = conn.cursor()

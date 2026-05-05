@@ -95,7 +95,7 @@ def _update_user(user_id, email, role):
 
 def _toggle_user_active(user_id, is_active):
     try:
-        response = requests.patch(f"{API_URL}/users/{user_id}/active", params={"is_active": (not is_active)}, timeout=5)
+        response = requests.patch(f"{API_URL}/users/{user_id}/active", params={"is_active": is_active}, timeout=5)
         if response.status_code >= 400:
             data = response.json() if response.content else {}
             return data.get("detail") or data.get("error") or "Cannot update user status."
