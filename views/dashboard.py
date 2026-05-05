@@ -95,6 +95,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                 return response.json().get("total_items", 0)
         except Exception:
             return 0
+        return 0
 
     def get_near_expiry(days=7):
         try:
@@ -103,6 +104,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                 return response.json().get("items_near_expiry", 0)
         except Exception:
             return 0
+        return 0
 
     def get_expired_today():
         try:
@@ -111,6 +113,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
                 return response.json().get("items_expired", 0)
         except Exception:
             return 0
+        return 0
 
     def get_waste_sum_since(days=7):
         try:
@@ -128,6 +131,7 @@ def dashboard_view(page: ft.Page) -> ft.View:
             return total
         except Exception:
             return 0.0
+        return 0.0
 
     def get_waste_distribution(top_n=5):
         try:
