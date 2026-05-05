@@ -42,6 +42,17 @@ def _load_waste_logs():
     return rows
 
 
+def _period_start_date(period: str) -> date:
+    """Return the start date for a given period filter."""
+    today = date.today()
+    if period == "monthly":
+        return today - timedelta(days=365)
+    elif period == "weekly":
+        return today - timedelta(days=27)
+    else:  # daily
+        return today - timedelta(days=6)
+
+
 @router.get("/dashboard/stats")
 def dashboard_stats():
     log("GET /dashboard/stats")
@@ -92,14 +103,13 @@ def reports_summary(period: str = Query(default="daily")):
     log("GET /reports/summary", {"period": period})
     waste_rows = _load_waste_logs()
     today = date.today()
+    start_date = _period_start_date(period)
+
     if period == "monthly":
-        start_date = today - timedelta(days=365)
         bucket = "month"
     elif period == "weekly":
-        start_date = today - timedelta(days=27)
         bucket = "week"
     else:
-        start_date = today - timedelta(days=6)
         bucket = "day"
 
     groups = {}
@@ -132,8 +142,15 @@ def reports_summary(period: str = Query(default="daily")):
 def reports_by_reason(period: str = Query(default="daily")):
     log("GET /reports/by-reason", {"period": period})
     waste_rows = _load_waste_logs()
+    start_date = _period_start_date(period)
+
     totals = {}
     for row in waste_rows:
+        # Filter by period — without this, all-time data was shown regardless of period
+        waste_date = row.get("waste_date") or ""
+        if waste_date < start_date.isoformat():
+            continue
+
         reason = (row.get("reason") or "other").lower()
         entry = totals.setdefault(reason, {"reason": reason, "count": 0, "cost_total": 0.0})
         entry["count"] += 1
